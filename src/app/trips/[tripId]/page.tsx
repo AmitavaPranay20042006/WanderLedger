@@ -5,16 +5,19 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp } from 'firebase/firestore'; 
-import type { User as FirebaseUser } from 'firebase/auth'; 
+import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch } from 'firebase/firestore';
+import type { User as FirebaseUser } from 'firebase/auth';
 import { useAuth } from '@/contexts/auth-context';
 import React, { useState } from 'react';
-import AddExpenseModal from '@/components/trips/add-expense-modal'; // New Import
+import AddExpenseModal from '@/components/trips/add-expense-modal';
+import InviteMemberModal from '@/components/trips/invite-member-modal'; // New
+import AddEventModal from '@/components/trips/add-event-modal'; // New
+import { Input } from '@/components/ui/input'; // New
 import { suggestDebtSettlement, type SuggestDebtSettlementInput, type SuggestDebtSettlementOutput } from '@/ai/flows/suggest-debt-settlement';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -26,12 +29,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 
 // --- Data Types ---
-interface Trip {
+export interface Trip { // Exporting for use in other components if needed
   id: string;
   name: string;
   destination: string;
@@ -41,46 +43,50 @@ interface Trip {
   coverPhotoURL: string;
   dataAiHint: string;
   ownerId: string;
-  members: string[]; // Array of user UIDs
+  members: string[]; 
   totalExpenses?: number;
-  baseCurrency?: string; // Added for future use
+  baseCurrency?: string; 
 }
 
-export interface Expense { // Exporting for use in modal
+export interface Expense { 
   id: string;
   description: string;
   amount: number;
-  currency: string; // Added
-  paidBy: string; // User UID
-  paidByName?: string; 
+  currency: string; 
+  paidBy: string; 
+  paidByName?: string;
   date: Date;
-  category: string; // Added
-  participants: string[]; // Array of user UIDs who participated
-  splitType: 'equally' | 'unequally' | 'percentage'; // For future expansion
-  notes?: string; // Added
-  createdAt?: FirestoreTimestamp; // Added
+  category: string; 
+  participants: string[]; 
+  splitType: 'equally' | 'unequally' | 'percentage'; 
+  notes?: string; 
+  createdAt?: FirestoreTimestamp; 
 }
 
-interface ItineraryEvent {
-  id:string;
+export interface ItineraryEvent { // Exporting
+  id: string;
   title: string;
   date: Date;
   time?: string;
-  type: string; 
+  type: string;
   location?: string;
   notes?: string;
+  endDate?: Date; // For multi-day events or accommodations
+  attachments?: string[]; // URLs to attachments in Firebase Storage
 }
 
-interface PackingListItem {
+export interface PackingListItem { // Exporting
   id: string;
   name: string;
   packed: boolean;
-  assignee?: string; 
-  assigneeName?: string; 
+  assignee?: string;
+  assigneeName?: string;
+  addedBy?: string;
+  lastCheckedBy?: string;
 }
 
-export interface Member { // Exporting for use in modal
-  id: string; // UID
+export interface Member { 
+  id: string; 
   displayName?: string | null;
   photoURL?: string | null;
   email?: string | null;
@@ -106,7 +112,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
       dataAiHint: data.dataAiHint,
       ownerId: data.ownerId,
       members: data.members || [],
-      baseCurrency: data.baseCurrency || 'USD', // Default currency
+      baseCurrency: data.baseCurrency || 'USD', 
     } as Trip;
   }
   return null;
@@ -124,9 +130,11 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
-    // Convert Firestore Timestamps to JS Dates for relevant fields
     if (data.date && data.date instanceof FirestoreTimestamp) {
       data.date = data.date.toDate();
+    }
+    if (data.endDate && data.endDate instanceof FirestoreTimestamp) { // For ItineraryEvent
+      data.endDate = data.endDate.toDate();
     }
     if (data.createdAt && data.createdAt instanceof FirestoreTimestamp) {
         data.createdAt = data.createdAt.toDate();
@@ -137,7 +145,7 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
 
 async function fetchMemberDetails(userId: string): Promise<Member | null> {
   if (!userId) return null;
-  const userRef = doc(db, 'users', userId); 
+  const userRef = doc(db, 'users', userId);
   const userSnap = await getDoc(userRef);
   if (userSnap.exists()) {
     const data = userSnap.data();
@@ -148,21 +156,16 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
       email: data.email || '',
     } as Member;
   }
-  return { id: userId, displayName: 'Unknown User', photoURL: `https://placehold.co/40x40.png?text=U` };
+  return { id: userId, displayName: 'Unknown User (' + userId.substring(0,6) + '...)', photoURL: `https://placehold.co/40x40.png?text=U`, email: '' };
 }
 
 
 // --- Tab Components ---
 
-interface TripDataProps {
-  trip: Trip;
-  currentUser: FirebaseUser | null;
-}
-
 function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses: Expense[] | undefined; currentUser: FirebaseUser | null}) {
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; // Placeholder, AI settlement will provide this
+  const netBalance = 0; 
 
   return (
     <div className="space-y-6">
@@ -173,16 +176,16 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
         <CardContent className="grid md:grid-cols-3 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
-            <p className="text-2xl font-bold">{trip.baseCurrency} {totalExpenses.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{trip.baseCurrency} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Spending</h3>
-            <p className="text-2xl font-bold">{trip.baseCurrency} {yourSpending.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{trip.baseCurrency} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
             <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {trip.baseCurrency} {netBalance.toLocaleString()}
+              {trip.baseCurrency} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </p>
             <p className="text-xs text-muted-foreground">Use AI settlement for details</p>
           </div>
@@ -193,7 +196,7 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
           <CardTitle>Description</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground">{trip.description || "No description provided for this trip."}</p>
+          <p className="text-muted-foreground whitespace-pre-wrap">{trip.description || "No description provided for this trip."}</p>
         </CardContent>
       </Card>
     </div>
@@ -205,7 +208,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   expenses: Expense[] | undefined; 
   members: Member[] | undefined;
   tripCurrency: string;
-  onExpenseAction: () => void; // Callback to refetch expenses
+  onExpenseAction: () => void; 
 }) {
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
@@ -234,7 +237,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
         expenses: expenses.map(e => ({
           payer: e.paidBy,
           amount: e.amount,
-          currency: e.currency, // Assuming expense currency, might need conversion to trip base currency
+          currency: e.currency, 
           participants: e.participants,
         })),
         members: members.map(m => m.id),
@@ -253,7 +256,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
       setIsSuggestingSettlement(false);
     }
   };
-
 
   return (
     <div className="space-y-6">
@@ -286,7 +288,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
-            onExpenseAction(); // Call prop to refetch
+            onExpenseAction(); 
             setIsAddExpenseModalOpen(false);
           }}
         />
@@ -315,7 +317,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
         </AlertDialog>
       )}
 
-
       {expenses && expenses.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
@@ -326,7 +327,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                     <div className="flex-grow">
                       <p className="font-medium">{exp.description}</p>
                       <p className="text-sm text-muted-foreground">
-                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()} - {exp.currency} {exp.amount.toLocaleString()}
+                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()} - {exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                       </p>
                       <p className="text-xs text-muted-foreground/80 mt-1">Category: {exp.category}</p>
                       {exp.participants && exp.participants.length > 0 && (
@@ -336,16 +337,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    <div className="mt-2 sm:mt-0 sm:ml-4 flex-shrink-0 flex items-center gap-2">
-                       {/* Placeholder for Edit/Delete actions - implement later
-                       <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <Edit className="h-4 w-4" />
-                       </Button>
-                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive opacity-0 group-hover:opacity-100 transition-opacity">
-                         <Trash2 className="h-4 w-4" />
-                       </Button>
-                       */}
-                    </div>
+                    {/* Edit/Delete Buttons - Future implementation */}
                   </div>
                 </li>
               ))}
@@ -365,14 +357,39 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   );
 }
 
-function MembersTab({ tripId, members }: { tripId: string; members: Member[] | undefined }) {
-    const { user: currentUser } = useAuth();
+function MembersTab({ trip, members, onMemberAction }: { 
+  trip: Trip; 
+  members: Member[] | undefined;
+  onMemberAction: () => void;
+}) {
+  const { user: currentUser } = useAuth();
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const isTripOwner = currentUser?.uid === trip.ownerId;
+
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Trip Members ({members?.length || 0})</h2>
-        <Button variant="outline" className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"><PlusCircle className="mr-2 h-4 w-4" /> Invite Member</Button>
+        {isTripOwner && (
+          <Button 
+            variant="outline" 
+            onClick={() => setIsInviteModalOpen(true)}
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
+            <PlusCircle className="mr-2 h-4 w-4" /> Invite Member
+          </Button>
+        )}
       </div>
+
+      {isInviteModalOpen && (
+        <InviteMemberModal
+          isOpen={isInviteModalOpen}
+          onClose={() => setIsInviteModalOpen(false)}
+          tripId={trip.id}
+          currentMembers={trip.members}
+          onMemberInvited={onMemberAction}
+        />
+      )}
+
       {members && members.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
@@ -387,8 +404,11 @@ function MembersTab({ tripId, members }: { tripId: string; members: Member[] | u
                     data-ai-hint="person avatar"
                   />
                   <div>
-                    <p className="font-medium">{member.displayName || member.id}</p>
-                    <p className="text-sm text-muted-foreground">{member.id === currentUser?.uid ? 'You' : 'Member'}</p>
+                    <p className="font-medium">{member.displayName || member.id.substring(0, 10) + "..."}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {member.id === currentUser?.uid ? 'You' : ''}
+                      {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : 'Owner') : 'Member'}
+                    </p>
                   </div>
                 </li>
               ))}
@@ -407,25 +427,49 @@ function MembersTab({ tripId, members }: { tripId: string; members: Member[] | u
   );
 }
 
-function ItineraryTab({ tripId, itineraryEvents }: { tripId: string, itineraryEvents: ItineraryEvent[] | undefined }) {
- return (
+function ItineraryTab({ tripId, itineraryEvents, onEventAction }: { 
+  tripId: string; 
+  itineraryEvents: ItineraryEvent[] | undefined;
+  onEventAction: () => void;
+}) {
+  const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
+
+  return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Itinerary</h2>
-        <Button className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"><PlusCircle className="mr-2 h-4 w-4" /> Add Event</Button>
+        <Button 
+          onClick={() => setIsAddEventModalOpen(true)}
+          className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
+          <PlusCircle className="mr-2 h-4 w-4" /> Add Event
+        </Button>
       </div>
+
+      {isAddEventModalOpen && (
+        <AddEventModal
+          isOpen={isAddEventModalOpen}
+          onClose={() => setIsAddEventModalOpen(false)}
+          tripId={tripId}
+          onEventAdded={() => {
+            onEventAction();
+            setIsAddEventModalOpen(false);
+          }}
+        />
+      )}
+
       {itineraryEvents && itineraryEvents.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
             <ul className="divide-y">
               {itineraryEvents.map(event => (
                 <li key={event.id} className="p-4 hover:bg-muted/50">
-                  <p className="font-medium">{event.title}</p>
+                  <p className="font-medium">{event.title} <Badge variant="outline" className="ml-2">{event.type}</Badge></p>
                   <p className="text-sm text-muted-foreground">
-                    {event.date.toLocaleDateString()} {event.time ? `- ${event.time}` : ''} - {event.type}
+                    {event.date.toLocaleDateString()} {event.time ? `- ${event.time}` : ''}
+                    {event.endDate && event.endDate > event.date ? ` to ${event.endDate.toLocaleDateString()}` : ''}
                   </p>
                   {event.location && <p className="text-xs text-muted-foreground/80 mt-1">Location: {event.location}</p>}
-                  {event.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {event.notes}</p>}
+                  {event.notes && <p className="text-xs text-muted-foreground/80 mt-1 whitespace-pre-wrap">Notes: {event.notes}</p>}
                 </li>
               ))}
             </ul>
@@ -444,19 +488,89 @@ function ItineraryTab({ tripId, itineraryEvents }: { tripId: string, itineraryEv
   );
 }
 
-function PackingListTab({ tripId, packingItems }: { tripId: string, packingItems: PackingListItem[] | undefined }) {
+function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: { 
+  tripId: string; 
+  packingItems: PackingListItem[] | undefined;
+  onPackingAction: () => void;
+  currentUser: FirebaseUser | null;
+}) {
+  const [newItemName, setNewItemName] = useState('');
+  const [isAddingItem, setIsAddingItem] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
   const totalItems = packingItems?.length || 0;
-  const packedItems = packingItems?.filter(item => item.packed).length || 0;
-  const progress = totalItems > 0 ? (packedItems / totalItems) * 100 : 0;
+  const packedItemsCount = packingItems?.filter(item => item.packed).length || 0;
+  const progress = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
+
+  const handleAddItem = async () => {
+    if (!newItemName.trim()) {
+      toast({ title: "Item name cannot be empty", variant: "destructive" });
+      return;
+    }
+    if (!currentUser) {
+        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        return;
+    }
+    setIsAddingItem(true);
+    try {
+      await addDoc(collection(db, 'trips', tripId, 'packingItems'), {
+        name: newItemName.trim(),
+        packed: false,
+        addedBy: currentUser.uid,
+        createdAt: FirestoreTimestamp.now(),
+      });
+      setNewItemName('');
+      onPackingAction(); // Refetch
+      toast({ title: "Item Added", description: `"${newItemName.trim()}" added to the packing list.` });
+    } catch (error: any) {
+      toast({ title: "Error Adding Item", description: error.message, variant: "destructive" });
+    } finally {
+      setIsAddingItem(false);
+    }
+  };
+
+  const handleTogglePacked = async (item: PackingListItem) => {
+    if (!currentUser) {
+        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        return;
+    }
+    const itemRef = doc(db, 'trips', tripId, 'packingItems', item.id);
+    try {
+      await updateDoc(itemRef, { 
+        packed: !item.packed,
+        lastCheckedBy: currentUser.uid,
+      });
+      // Optimistic update in React Query cache
+      queryClient.setQueryData<PackingListItem[]>(['tripPackingList', tripId], (oldData) =>
+        oldData?.map(oldItem => oldItem.id === item.id ? { ...oldItem, packed: !oldItem.packed, lastCheckedBy: currentUser.uid } : oldItem)
+      );
+      // No need to call onPackingAction() here as setQueryData handles local state
+    } catch (error: any) {
+      toast({ title: "Error Updating Item", description: error.message, variant: "destructive" });
+    }
+  };
 
  return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-        <h2 className="text-2xl font-semibold">Packing List ({packedItems}/{totalItems} packed)</h2>
-        <Button className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"><PlusCircle className="mr-2 h-4 w-4" /> Add Item</Button>
+        <h2 className="text-2xl font-semibold">Packing List ({packedItemsCount}/{totalItems} packed)</h2>
       </div>
       <Card className="shadow-sm">
         <CardContent className="pt-6"> 
+          <form onSubmit={(e) => { e.preventDefault(); handleAddItem(); }} className="flex gap-2 mb-4">
+            <Input 
+              placeholder="Add new packing item..." 
+              value={newItemName} 
+              onChange={(e) => setNewItemName(e.target.value)}
+              disabled={isAddingItem}
+            />
+            <Button type="submit" disabled={isAddingItem || !newItemName.trim()}>
+              {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+              <span className="hidden sm:inline ml-2">Add</span>
+            </Button>
+          </form>
+
           {totalItems > 0 && (
             <div className="w-full bg-muted rounded-full h-2.5 mb-4 shadow-inner">
               <div 
@@ -465,14 +579,21 @@ function PackingListTab({ tripId, packingItems }: { tripId: string, packingItems
               ></div>
             </div>
           )}
+
           {packingItems && packingItems.length > 0 ? (
-            <ul className="divide-y">
+            <ul className="divide-y max-h-96 overflow-y-auto">
               {packingItems.map(item => (
-                <li key={item.id} className="py-3 flex justify-between items-center hover:bg-muted/50 px-1">
-                  <span className={`${item.packed ? 'line-through text-muted-foreground' : ''}`}>{item.name}</span>
-                  <Badge variant={item.packed ? "secondary" : "outline"}>
-                    {item.packed ? "Packed" : "To Pack"}
-                  </Badge>
+                <li key={item.id} className="py-3 flex justify-between items-center hover:bg-muted/50 px-1 group">
+                  <label htmlFor={`item-${item.id}`} className="flex items-center cursor-pointer flex-grow">
+                    <Checkbox 
+                      id={`item-${item.id}`}
+                      checked={item.packed} 
+                      onCheckedChange={() => handleTogglePacked(item)}
+                      className="mr-3"
+                    />
+                    <span className={`${item.packed ? 'line-through text-muted-foreground' : ''}`}>{item.name}</span>
+                  </label>
+                  {/* Future: Assignee, Delete button */}
                 </li>
               ))}
             </ul>
@@ -497,15 +618,15 @@ export default function TripDetailPage() {
   const queryClient = useQueryClient();
 
 
-  const { data: trip, isLoading: isLoadingTrip, error: errorTrip } = useQuery<Trip | null, Error>({
+  const { data: trip, isLoading: isLoadingTrip, error: errorTrip, refetch: refetchTripDetails } = useQuery<Trip | null, Error>({
     queryKey: ['tripDetails', tripId],
     queryFn: () => fetchTripDetails(tripId),
     enabled: !!tripId,
   });
 
-  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses, refetch: refetchExpenses } = useQuery<Expense[], Error>({
+  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses } = useQuery<Expense[], Error>({
     queryKey: ['tripExpenses', tripId],
-    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'), // Ordered by date desc
+    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'), 
     enabled: !!tripId,
   });
   
@@ -517,7 +638,7 @@ export default function TripDetailPage() {
 
   const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking } = useQuery<PackingListItem[], Error>({
     queryKey: ['tripPackingList', tripId],
-    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'name', 'asc'),
+    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'), // Order by createdAt
     enabled: !!tripId,
   });
 
@@ -527,7 +648,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 5 * 60 * 1000, // Cache member details for 5 mins
+      staleTime: 5 * 60 * 1000, 
     })),
   });
 
@@ -537,10 +658,13 @@ export default function TripDetailPage() {
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
 
-  const handleExpenseAction = () => {
-    queryClient.invalidateQueries({ queryKey: ['tripExpenses', tripId] });
-    // Potentially invalidate tripDetails if totalExpenses is calculated server-side or on trip doc
-    queryClient.invalidateQueries({ queryKey: ['tripDetails', tripId] }); 
+  const handleGenericAction = (queryKey: string | string[]) => {
+    const key = Array.isArray(queryKey) ? queryKey : [queryKey, tripId];
+    queryClient.invalidateQueries({ queryKey: key });
+    if (queryKey === 'tripDetails' || (Array.isArray(queryKey) && queryKey[0] === 'tripDetails')) {
+        refetchTripDetails(); // Specifically refetch trip details for member changes
+        queryClient.invalidateQueries({ queryKey: ['memberDetails'] }); // Invalidate all member details
+    }
   };
 
 
@@ -572,7 +696,6 @@ export default function TripDetailPage() {
     );
   }
   
-
   return (
     <div className="space-y-8">
       <div className="relative h-64 md:h-80 rounded-xl overflow-hidden shadow-lg group">
@@ -626,30 +749,30 @@ export default function TripDetailPage() {
            trip ? <TripOverviewTab trip={trip} expenses={expenses} currentUser={currentUser} /> : <p>No trip data.</p>}
         </TabsContent>
         <TabsContent value="expenses">
-          {isLoadingExpenses ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+          {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorExpenses ? <p className="text-destructive">Error loading expenses: {errorExpenses.message}</p> :
-           <ExpensesTab 
+           trip && <ExpensesTab 
               tripId={tripId} 
               expenses={expenses} 
               members={members} 
               tripCurrency={trip.baseCurrency || 'USD'}
-              onExpenseAction={handleExpenseAction}
+              onExpenseAction={() => handleGenericAction('tripExpenses')}
             />}
         </TabsContent>
         <TabsContent value="members">
-          {isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
-           errorMembers ? <p className="text-destructive">Error loading members: {errorMembers.message}</p> :
-           <MembersTab tripId={tripId} members={members} />}
+          {isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+           errorMembers || errorTrip ? <p className="text-destructive">Error loading members: {(errorMembers || errorTrip)?.message}</p> :
+           trip && <MembersTab trip={trip} members={members} onMemberAction={() => handleGenericAction('tripDetails')} />}
         </TabsContent>
         <TabsContent value="itinerary">
           {isLoadingItinerary ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorItinerary ? <p className="text-destructive">Error loading itinerary: {errorItinerary.message}</p> :
-           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} />}
+           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} onEventAction={() => handleGenericAction('tripItinerary')} />}
         </TabsContent>
         <TabsContent value="packing">
           {isLoadingPacking ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorPacking ? <p className="text-destructive">Error loading packing list: {errorPacking.message}</p> :
-           <PackingListTab tripId={tripId} packingItems={packingItems} />}
+           <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction('tripPackingList')} currentUser={currentUser} />}
         </TabsContent>
       </Tabs>
     </div>
