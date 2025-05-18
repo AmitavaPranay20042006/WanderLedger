@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -13,11 +13,12 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useAuth } from '@/contexts/auth-context';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AddExpenseModal from '@/components/trips/add-expense-modal';
-import InviteMemberModal from '@/components/trips/invite-member-modal'; // New
-import AddEventModal from '@/components/trips/add-event-modal'; // New
-import { Input } from '@/components/ui/input'; // New
+import InviteMemberModal from '@/components/trips/invite-member-modal';
+import AddEventModal from '@/components/trips/add-event-modal';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox'; // Added Checkbox
 import { suggestDebtSettlement, type SuggestDebtSettlementInput, type SuggestDebtSettlementOutput } from '@/ai/flows/suggest-debt-settlement';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -33,7 +34,7 @@ import {
 
 
 // --- Data Types ---
-export interface Trip { // Exporting for use in other components if needed
+export interface Trip { 
   id: string;
   name: string;
   destination: string;
@@ -44,7 +45,7 @@ export interface Trip { // Exporting for use in other components if needed
   dataAiHint: string;
   ownerId: string;
   members: string[]; 
-  totalExpenses?: number;
+  totalExpenses?: number; // This can be calculated client-side or stored
   baseCurrency?: string; 
 }
 
@@ -54,35 +55,37 @@ export interface Expense {
   amount: number;
   currency: string; 
   paidBy: string; 
-  paidByName?: string;
+  paidByName?: string; // To be populated client-side
   date: Date;
   category: string; 
   participants: string[]; 
   splitType: 'equally' | 'unequally' | 'percentage'; 
   notes?: string; 
-  createdAt?: FirestoreTimestamp; 
+  createdAt?: Date; // Changed to Date for consistency
 }
 
-export interface ItineraryEvent { // Exporting
+export interface ItineraryEvent { 
   id: string;
   title: string;
   date: Date;
   time?: string;
-  type: string;
+  type: string; // e.g., 'Activity', 'Flight', 'Accommodation'
   location?: string;
   notes?: string;
-  endDate?: Date; // For multi-day events or accommodations
-  attachments?: string[]; // URLs to attachments in Firebase Storage
+  endDate?: Date; 
+  attachments?: string[]; 
+  createdAt?: Date; // Changed to Date for consistency
 }
 
-export interface PackingListItem { // Exporting
+export interface PackingListItem { 
   id: string;
   name: string;
   packed: boolean;
-  assignee?: string;
-  assigneeName?: string;
-  addedBy?: string;
-  lastCheckedBy?: string;
+  assignee?: string; // User ID
+  assigneeName?: string; // To be populated client-side
+  addedBy?: string; // User ID
+  lastCheckedBy?: string; // User ID
+  createdAt?: Date; // Changed to Date for consistency
 }
 
 export interface Member { 
@@ -112,7 +115,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
       dataAiHint: data.dataAiHint,
       ownerId: data.ownerId,
       members: data.members || [],
-      baseCurrency: data.baseCurrency || 'USD', 
+      baseCurrency: data.baseCurrency || 'INR', // Default to INR
     } as Trip;
   }
   return null;
@@ -130,15 +133,12 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
-    if (data.date && data.date instanceof FirestoreTimestamp) {
-      data.date = data.date.toDate();
-    }
-    if (data.endDate && data.endDate instanceof FirestoreTimestamp) { // For ItineraryEvent
-      data.endDate = data.endDate.toDate();
-    }
-    if (data.createdAt && data.createdAt instanceof FirestoreTimestamp) {
-        data.createdAt = data.createdAt.toDate();
-    }
+    // Convert all Firestore Timestamps to JS Dates
+    Object.keys(data).forEach(key => {
+      if (data[key] instanceof FirestoreTimestamp) {
+        data[key] = (data[key] as FirestoreTimestamp).toDate();
+      }
+    });
     return { ...data, [idField]: docSnap.id } as T;
   });
 }
@@ -156,6 +156,7 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
       email: data.email || '',
     } as Member;
   }
+  // Fallback for UIDs not found in users collection (e.g. if user deleted account but was a member)
   return { id: userId, displayName: 'Unknown User (' + userId.substring(0,6) + '...)', photoURL: `https://placehold.co/40x40.png?text=U`, email: '' };
 }
 
@@ -163,35 +164,37 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
 // --- Tab Components ---
 
 function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses: Expense[] | undefined; currentUser: FirebaseUser | null}) {
+  const displayCurrency = trip.baseCurrency || 'INR';
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+  // This is a simplified 'Your Spending'. A proper calculation would consider shared costs.
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; 
+  const netBalance = 0; // Placeholder: Real calculation needs to consider shares from all expenses
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Trip Summary</CardTitle>
         </CardHeader>
-        <CardContent className="grid md:grid-cols-3 gap-4">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
-            <p className="text-2xl font-bold">{trip.baseCurrency} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-2xl font-bold">{displayCurrency} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
-            <h3 className="text-sm font-medium text-muted-foreground">Your Spending</h3>
-            <p className="text-2xl font-bold">{trip.baseCurrency} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <h3 className="text-sm font-medium text-muted-foreground">Your Spending (Paid by You)</h3>
+            <p className="text-2xl font-bold">{displayCurrency} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
             <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {trip.baseCurrency} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              {displayCurrency} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </p>
-            <p className="text-xs text-muted-foreground">Use AI settlement for details</p>
+            <p className="text-xs text-muted-foreground">AI settlement needed for details</p>
           </div>
         </CardContent>
       </Card>
-      <Card>
+      <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Description</CardTitle>
         </CardHeader>
@@ -269,13 +272,13 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
           </Button>
           <Button 
-            variant="secondary" 
+            variant="outline" 
             onClick={handleSuggestSettlement}
             disabled={isSuggestingSettlement || !expenses || expenses.length === 0}
             className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
           >
             {isSuggestingSettlement ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            Suggest Debt Settlement (AI)
+            Suggest Settlement (AI)
           </Button>
         </div>
       </div>
@@ -300,15 +303,15 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             <AlertDialogHeader>
               <AlertDialogTitle>Suggested Debt Settlement</AlertDialogTitle>
               <AlertDialogDescription>
-                Here&apos;s an optimized plan to settle debts:
+                Here&apos;s an optimized plan to settle debts based on the expenses recorded:
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="my-4 space-y-2">
+            <div className="my-4 space-y-2 text-sm">
               {settlementPlan.length > 0 ? settlementPlan.map((item, index) => (
-                <div key={index} className="p-3 bg-muted rounded-md text-sm">
-                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: {item.currency} {item.amount.toFixed(2)}
+                <div key={index} className="p-3 bg-muted rounded-md">
+                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: <span className="font-semibold">{item.currency} {item.amount.toFixed(2)}</span>
                 </div>
-              )) : <p>No settlements needed or unable to determine.</p>}
+              )) : <p className="text-muted-foreground">No settlements needed or AI could not determine a plan with the current data.</p>}
             </div>
             <AlertDialogFooter>
               <AlertDialogAction onClick={() => setIsSettlementModalOpen(false)}>Got it!</AlertDialogAction>
@@ -323,13 +326,16 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             <ul className="divide-y">
               {expenses.map(exp => (
                 <li key={exp.id} className="p-4 hover:bg-muted/50 group">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-start">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2">
                     <div className="flex-grow">
-                      <p className="font-medium">{exp.description}</p>
+                      <p className="font-semibold text-base">{exp.description}</p>
                       <p className="text-sm text-muted-foreground">
-                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()} - {exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()}
                       </p>
-                      <p className="text-xs text-muted-foreground/80 mt-1">Category: {exp.category}</p>
+                      <p className="text-lg font-medium mt-1">
+                        {exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                         <Badge variant="outline" className="ml-2 text-xs">{exp.category}</Badge>
+                      </p>
                       {exp.participants && exp.participants.length > 0 && (
                         <p className="text-xs text-muted-foreground/80 mt-1">
                           Participants: {getParticipantNames(exp.participants)}
@@ -337,7 +343,11 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    {/* Edit/Delete Buttons - Future implementation */}
+                    {/* Placeholder for Edit/Delete Buttons */}
+                    {/* <div className="flex-shrink-0 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                    </div> */}
                   </div>
                 </li>
               ))}
@@ -345,11 +355,11 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           </CardContent>
         </Card>
       ) : (
-        <Card className="text-center py-8 shadow-sm">
+        <Card className="text-center py-10 shadow-sm border-dashed">
             <CardContent>
                 <DollarSign className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No expenses recorded yet for this trip.</p>
-                <p className="text-sm text-muted-foreground mt-1">Be the first to add one!</p>
+                <p className="text-muted-foreground font-semibold">No expenses recorded yet.</p>
+                <p className="text-sm text-muted-foreground mt-1">Start by adding the first shared cost!</p>
             </CardContent>
         </Card>
       )}
@@ -357,9 +367,9 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   );
 }
 
-function MembersTab({ trip, members, onMemberAction }: { 
+function MembersTab({ trip, members: fetchedMembers, onMemberAction }: { 
   trip: Trip; 
-  members: Member[] | undefined;
+  members: Member[] | undefined; // Renamed to avoid conflict
   onMemberAction: () => void;
 }) {
   const { user: currentUser } = useAuth();
@@ -369,13 +379,13 @@ function MembersTab({ trip, members, onMemberAction }: {
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-        <h2 className="text-2xl font-semibold">Trip Members ({members?.length || 0})</h2>
+        <h2 className="text-2xl font-semibold">Trip Members ({fetchedMembers?.length || 0})</h2>
         {isTripOwner && (
           <Button 
             variant="outline" 
             onClick={() => setIsInviteModalOpen(true)}
             className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
-            <PlusCircle className="mr-2 h-4 w-4" /> Invite Member
+            <UserPlus className="mr-2 h-4 w-4" /> Invite Member
           </Button>
         )}
       </div>
@@ -385,20 +395,23 @@ function MembersTab({ trip, members, onMemberAction }: {
           isOpen={isInviteModalOpen}
           onClose={() => setIsInviteModalOpen(false)}
           tripId={trip.id}
-          currentMembers={trip.members}
-          onMemberInvited={onMemberAction}
+          currentMembers={trip.members} // Pass current member UIDs
+          onMemberInvited={() => {
+            onMemberAction(); // This will refetch trip details, which includes members array
+            setIsInviteModalOpen(false);
+          }}
         />
       )}
 
-      {members && members.length > 0 ? (
+      {fetchedMembers && fetchedMembers.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
             <ul className="divide-y">
-              {members.map(member => (
-                <li key={member.id} className="p-4 flex items-center space-x-3 hover:bg-muted/50">
+              {fetchedMembers.map(member => (
+                <li key={member.id} className="p-4 flex items-center space-x-4 hover:bg-muted/50">
                   <Image 
                     src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`} 
-                    alt={member.displayName || 'Member'} 
+                    alt={member.displayName || 'Member avatar'} 
                     width={40} height={40} 
                     className="rounded-full" 
                     data-ai-hint="person avatar"
@@ -406,20 +419,22 @@ function MembersTab({ trip, members, onMemberAction }: {
                   <div>
                     <p className="font-medium">{member.displayName || member.id.substring(0, 10) + "..."}</p>
                     <p className="text-sm text-muted-foreground">
-                      {member.id === currentUser?.uid ? 'You' : ''}
-                      {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : 'Owner') : 'Member'}
+                      {member.id === currentUser?.uid && 'You'}
+                      {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : ' (Owner)') : ''}
                     </p>
                   </div>
+                  {/* Placeholder for Admin Actions (Promote/Demote/Remove) */}
                 </li>
               ))}
             </ul>
           </CardContent>
         </Card>
       ) : (
-        <Card className="text-center py-8 shadow-sm">
+        <Card className="text-center py-10 shadow-sm border-dashed">
             <CardContent>
                 <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No members found for this trip.</p>
+                <p className="text-muted-foreground font-semibold">No members found.</p>
+                {isTripOwner && <p className="text-sm text-muted-foreground mt-1">Invite members to start collaborating!</p>}
             </CardContent>
         </Card>
       )}
@@ -433,6 +448,17 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
   onEventAction: () => void;
 }) {
   const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
+
+  // Group events by date for display
+  const groupedEvents = itineraryEvents?.reduce((acc, event) => {
+    const dateStr = event.date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    if (!acc[dateStr]) {
+      acc[dateStr] = [];
+    }
+    acc[dateStr].push(event);
+    return acc;
+  }, {} as Record<string, ItineraryEvent[]>);
+
 
   return (
     <div className="space-y-6">
@@ -457,30 +483,40 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
         />
       )}
 
-      {itineraryEvents && itineraryEvents.length > 0 ? (
-        <Card className="shadow-sm">
-          <CardContent className="p-0">
-            <ul className="divide-y">
-              {itineraryEvents.map(event => (
-                <li key={event.id} className="p-4 hover:bg-muted/50">
-                  <p className="font-medium">{event.title} <Badge variant="outline" className="ml-2">{event.type}</Badge></p>
-                  <p className="text-sm text-muted-foreground">
-                    {event.date.toLocaleDateString()} {event.time ? `- ${event.time}` : ''}
-                    {event.endDate && event.endDate > event.date ? ` to ${event.endDate.toLocaleDateString()}` : ''}
-                  </p>
-                  {event.location && <p className="text-xs text-muted-foreground/80 mt-1">Location: {event.location}</p>}
-                  {event.notes && <p className="text-xs text-muted-foreground/80 mt-1 whitespace-pre-wrap">Notes: {event.notes}</p>}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+      {groupedEvents && Object.keys(groupedEvents).length > 0 ? (
+        Object.entries(groupedEvents).map(([dateStr, eventsOnDate]) => (
+          <Card key={dateStr} className="shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg">{dateStr}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ul className="divide-y">
+                {eventsOnDate.sort((a,b) => (a.time || "00:00").localeCompare(b.time || "00:00")).map(event => ( // Sort by time within day
+                  <li key={event.id} className="p-4 hover:bg-muted/50">
+                     <div className="flex items-start gap-3">
+                        {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
+                        <div className={event.time ? "border-l pl-3 flex-grow" : "flex-grow"}>
+                            <p className="font-semibold">{event.title} <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge></p>
+                            {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPin className="h-3 w-3 mr-1.5"/> {event.location}</p>}
+                            {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
+                            {event.endDate && event.endDate.getTime() > event.date.getTime() &&
+                             !event.time && // Show only if it's a multi-day event without specific start time
+                                <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
+                            }
+                        </div>
+                     </div>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ))
       ) : (
-         <Card className="text-center py-8 shadow-sm">
+         <Card className="text-center py-10 shadow-sm border-dashed">
             <CardContent>
                 <FileText className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No itinerary items added yet.</p>
-                <p className="text-sm text-muted-foreground mt-1">Start planning your activities!</p>
+                <p className="text-muted-foreground font-semibold">Itinerary is empty.</p>
+                <p className="text-sm text-muted-foreground mt-1">Add flights, accommodations, or activities!</p>
             </CardContent>
         </Card>
       )}
@@ -518,7 +554,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(),
+        createdAt: FirestoreTimestamp.now(), // Use Firestore Timestamp for creation
       });
       setNewItemName('');
       onPackingAction(); // Refetch
@@ -541,13 +577,14 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      // Optimistic update in React Query cache
+      // Optimistic update (optional but good for UX)
       queryClient.setQueryData<PackingListItem[]>(['tripPackingList', tripId], (oldData) =>
         oldData?.map(oldItem => oldItem.id === item.id ? { ...oldItem, packed: !oldItem.packed, lastCheckedBy: currentUser.uid } : oldItem)
       );
-      // No need to call onPackingAction() here as setQueryData handles local state
+      onPackingAction(); // Ensure data consistency with a refetch
     } catch (error: any) {
       toast({ title: "Error Updating Item", description: error.message, variant: "destructive" });
+      // Optionally revert optimistic update here if needed
     }
   };
 
@@ -558,49 +595,54 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
       </div>
       <Card className="shadow-sm">
         <CardContent className="pt-6"> 
-          <form onSubmit={(e) => { e.preventDefault(); handleAddItem(); }} className="flex gap-2 mb-4">
+          <form onSubmit={(e) => { e.preventDefault(); handleAddItem(); }} className="flex gap-2 mb-6">
             <Input 
-              placeholder="Add new packing item..." 
+              placeholder="Add new packing item (e.g., Passport, Sunscreen)" 
               value={newItemName} 
               onChange={(e) => setNewItemName(e.target.value)}
               disabled={isAddingItem}
+              className="flex-grow"
             />
-            <Button type="submit" disabled={isAddingItem || !newItemName.trim()}>
+            <Button type="submit" disabled={isAddingItem || !newItemName.trim()} className="flex-shrink-0">
               {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
-              <span className="hidden sm:inline ml-2">Add</span>
+              <span className="hidden sm:inline ml-2">Add Item</span>
             </Button>
           </form>
 
           {totalItems > 0 && (
-            <div className="w-full bg-muted rounded-full h-2.5 mb-4 shadow-inner">
+            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden">
               <div 
                 className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out" 
                 style={{ width: `${progress}%` }}
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                role="progressbar"
               ></div>
             </div>
           )}
 
           {packingItems && packingItems.length > 0 ? (
-            <ul className="divide-y max-h-96 overflow-y-auto">
+            <ul className="divide-y max-h-96 overflow-y-auto border rounded-md">
               {packingItems.map(item => (
-                <li key={item.id} className="py-3 flex justify-between items-center hover:bg-muted/50 px-1 group">
-                  <label htmlFor={`item-${item.id}`} className="flex items-center cursor-pointer flex-grow">
+                <li key={item.id} className="py-3 px-4 flex justify-between items-center hover:bg-muted/50 group">
+                  <label htmlFor={`item-${item.id}`} className="flex items-center cursor-pointer flex-grow gap-3">
                     <Checkbox 
                       id={`item-${item.id}`}
                       checked={item.packed} 
                       onCheckedChange={() => handleTogglePacked(item)}
-                      className="mr-3"
+                      aria-label={`Mark ${item.name} as ${item.packed ? 'unpacked' : 'packed'}`}
                     />
-                    <span className={`${item.packed ? 'line-through text-muted-foreground' : ''}`}>{item.name}</span>
+                    <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
-                  {/* Future: Assignee, Delete button */}
+                  {/* Future: Assignee, Delete button (visible to admin/creator) */}
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="text-center py-8">
+            <div className="text-center py-10 border border-dashed rounded-md">
                  <ListChecks className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">Your packing list is empty.</p>
+                <p className="text-muted-foreground font-semibold">Your packing list is empty.</p>
                 <p className="text-sm text-muted-foreground mt-1">Add items you need for the trip!</p>
             </div>
           )}
@@ -624,21 +666,21 @@ export default function TripDetailPage() {
     enabled: !!tripId,
   });
 
-  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses } = useQuery<Expense[], Error>({
+  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses, refetch: refetchExpenses } = useQuery<Expense[], Error>({
     queryKey: ['tripExpenses', tripId],
     queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'), 
     enabled: !!tripId,
   });
   
-  const { data: itineraryEvents, isLoading: isLoadingItinerary, error: errorItinerary } = useQuery<ItineraryEvent[], Error>({
+  const { data: itineraryEvents, isLoading: isLoadingItinerary, error: errorItinerary, refetch: refetchItinerary } = useQuery<ItineraryEvent[], Error>({
     queryKey: ['tripItinerary', tripId],
     queryFn: () => fetchSubCollection<ItineraryEvent>(tripId, 'itineraryEvents', 'id', 'date', 'asc'),
     enabled: !!tripId,
   });
 
-  const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking } = useQuery<PackingListItem[], Error>({
+  const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking, refetch: refetchPackingList } = useQuery<PackingListItem[], Error>({
     queryKey: ['tripPackingList', tripId],
-    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'), // Order by createdAt
+    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'),
     enabled: !!tripId,
   });
 
@@ -648,7 +690,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 5 * 60 * 1000, 
+      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
     })),
   });
 
@@ -658,12 +700,18 @@ export default function TripDetailPage() {
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
 
-  const handleGenericAction = (queryKey: string | string[]) => {
-    const key = Array.isArray(queryKey) ? queryKey : [queryKey, tripId];
+  // Generic action handler to refetch specific data or all trip data
+  const handleGenericAction = (queryKeyToInvalidate: string | string[]) => {
+    const key = Array.isArray(queryKeyToInvalidate) ? queryKeyToInvalidate : [queryKeyToInvalidate, tripId];
     queryClient.invalidateQueries({ queryKey: key });
-    if (queryKey === 'tripDetails' || (Array.isArray(queryKey) && queryKey[0] === 'tripDetails')) {
-        refetchTripDetails(); // Specifically refetch trip details for member changes
-        queryClient.invalidateQueries({ queryKey: ['memberDetails'] }); // Invalidate all member details
+
+    // If trip details (like members array) might have changed, refetch trip details and member details
+    if (queryKeyToInvalidate === 'tripDetails' || (Array.isArray(queryKeyToInvalidate) && queryKeyToInvalidate[0] === 'tripDetails')) {
+        refetchTripDetails();
+        // Invalidate all individual memberDetail queries if the members array might have changed
+        memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
+        // And refetch the members list if the parent trip members list changed
+        if (trip) queryClient.invalidateQueries({ queryKey: ['memberDetails'] });
     }
   };
 
@@ -696,50 +744,53 @@ export default function TripDetailPage() {
     );
   }
   
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
+
   return (
-    <div className="space-y-8">
-      <div className="relative h-64 md:h-80 rounded-xl overflow-hidden shadow-lg group">
+    <div className="space-y-6 md:space-y-8 pb-8">
+      <div className="relative h-56 md:h-80 rounded-xl overflow-hidden shadow-lg group">
         <Image 
-          src={trip.coverPhotoURL || 'https://placehold.co/1200x400.png?text=Trip+Photo'} 
+          src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`} 
           alt={trip.name} 
           fill
           style={{ objectFit: 'cover' }}
           className="brightness-75 group-hover:brightness-90 transition-all duration-300"
           data-ai-hint={trip.dataAiHint || 'travel landscape'}
-          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
+          sizes="(max-width: 768px) 100vw, 1200px"
           priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"></div>
         <div className="absolute bottom-0 left-0 p-4 md:p-8 text-white">
           <h1 className="text-3xl md:text-5xl font-bold drop-shadow-md">{trip.name}</h1>
-          <p className="text-lg md:text-xl text-gray-200 flex items-center mt-2 drop-shadow-sm">
-            <MapPin className="mr-2 h-5 w-5 flex-shrink-0" /> {trip.destination}
+          <p className="text-base md:text-lg text-gray-200 flex items-center mt-1 md:mt-2 drop-shadow-sm">
+            <MapPin className="mr-2 h-4 w-4 md:h-5 md:w-5 flex-shrink-0" /> {trip.destination}
           </p>
-          <p className="text-sm text-gray-300 flex items-center mt-1 drop-shadow-sm">
-            <CalendarDays className="mr-2 h-4 w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
+          <p className="text-xs md:text-sm text-gray-300 flex items-center mt-1 drop-shadow-sm">
+            <CalendarDays className="mr-2 h-3 w-3 md:h-4 md:w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </div>
-        <Button variant="outline" className="absolute top-4 right-4 bg-background/80 hover:bg-background text-foreground shadow-md hover:shadow-lg transition-all">
-            <Settings className="mr-2 h-4 w-4" /> Trip Settings
-        </Button>
+        {/* Trip Settings Button - Placeholder functionality */}
+        {/* <Button variant="outline" className="absolute top-3 right-3 md:top-4 md:right-4 bg-background/80 hover:bg-background text-foreground shadow-md hover:shadow-lg transition-all text-xs px-2 py-1 h-auto md:text-sm md:px-3 md:py-2">
+            <Settings className="mr-1 md:mr-2 h-3 w-3 md:h-4 md:w-4" /> <span className="hidden sm:inline">Settings</span>
+        </Button> */}
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg">
-          <TabsTrigger value="overview" className="flex-1 py-2.5 text-xs sm:text-sm">
-            <BarChart3 className="h-4 w-4 xs:mr-0 sm:mr-2" /> <span className="hidden xs:hidden sm:inline">Overview</span>
+        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
+          <TabsTrigger value="overview" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <BarChart3 className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Overview</span>
           </TabsTrigger>
-          <TabsTrigger value="expenses" className="flex-1 py-2.5 text-xs sm:text-sm">
-            <DollarSign className="h-4 w-4 xs:mr-0 sm:mr-2" /> <span className="hidden xs:hidden sm:inline">Expenses</span>
+          <TabsTrigger value="expenses" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <DollarSign className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Expenses</span>
           </TabsTrigger>
-          <TabsTrigger value="members" className="flex-1 py-2.5 text-xs sm:text-sm">
-            <Users className="h-4 w-4 xs:mr-0 sm:mr-2" /> <span className="hidden xs:hidden sm:inline">Members</span>
+          <TabsTrigger value="members" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <Users className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Members</span>
           </TabsTrigger>
-          <TabsTrigger value="itinerary" className="flex-1 py-2.5 text-xs sm:text-sm">
-            <FileText className="h-4 w-4 xs:mr-0 sm:mr-2" /> <span className="hidden xs:hidden sm:inline">Itinerary</span>
+          <TabsTrigger value="itinerary" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <FileText className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Itinerary</span>
           </TabsTrigger>
-          <TabsTrigger value="packing" className="flex-1 py-2.5 text-xs sm:text-sm">
-            <ListChecks className="h-4 w-4 xs:mr-0 sm:mr-2" /> <span className="hidden xs:hidden sm:inline">Packing List</span>
+          <TabsTrigger value="packing" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <ListChecks className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Packing</span>
           </TabsTrigger>
         </TabsList>
         
@@ -755,7 +806,7 @@ export default function TripDetailPage() {
               tripId={tripId} 
               expenses={expenses} 
               members={members} 
-              tripCurrency={trip.baseCurrency || 'USD'}
+              tripCurrency={trip.baseCurrency || 'INR'}
               onExpenseAction={() => handleGenericAction('tripExpenses')}
             />}
         </TabsContent>
@@ -778,3 +829,4 @@ export default function TripDetailPage() {
     </div>
   );
 }
+

@@ -22,13 +22,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { CalendarIcon, Loader2, MapPin, FileText, Image as ImageIcon } from 'lucide-react';
+import { CalendarIcon, Loader2, MapPin, FileText, Image as ImageIcon, IndianRupee } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { db, storage } from '@/lib/firebase';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from '@/contexts/auth-context';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Added
+
+const supportedCurrencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CAD', 'AUD']; // Example list
 
 const tripFormSchema = z.object({
   name: z.string().min(3, { message: 'Trip name must be at least 3 characters.' }).max(100),
@@ -37,6 +40,7 @@ const tripFormSchema = z.object({
   endDate: z.date({ required_error: 'End date is required.' }),
   description: z.string().max(500).optional(),
   coverPhoto: z.instanceof(File).optional().nullable(),
+  baseCurrency: z.string().min(3, {message: 'Currency is required.'}).max(3),
 }).refine(data => data.endDate >= data.startDate, {
   message: "End date cannot be before start date.",
   path: ["endDate"],
@@ -57,6 +61,7 @@ export default function CreateTripPage() {
       destination: '',
       description: '',
       coverPhoto: null,
+      baseCurrency: 'INR', // Default to INR
     },
   });
 
@@ -70,7 +75,7 @@ export default function CreateTripPage() {
 
     try {
       let coverPhotoURL = `https://placehold.co/600x400.png?text=${encodeURIComponent(values.name)}`;
-      let dataAiHint = `${values.destination.split(',')[0].trim().toLowerCase()} travel`; // Basic hint for placeholder
+      let dataAiHint = `${values.destination.split(',')[0].trim().toLowerCase()} travel`;
 
       if (values.coverPhoto && values.coverPhoto instanceof File) {
         const photoFile = values.coverPhoto;
@@ -79,28 +84,26 @@ export default function CreateTripPage() {
         
         const uploadTask = await uploadBytes(storageRef, photoFile);
         coverPhotoURL = await getDownloadURL(uploadTask.ref);
-        // For a user-uploaded image, a more generic hint or one derived from filename/destination might be better
-        // Or a Genkit flow could analyze the image if desired (more complex).
         dataAiHint = `${values.destination.split(',')[0].trim().toLowerCase()} photo`; 
       }
 
       const tripData = {
         name: values.name,
         destination: values.destination,
-        startDate: values.startDate, // Firestore handles JS Date conversion to Timestamp
+        startDate: values.startDate,
         endDate: values.endDate,
         description: values.description || '',
         coverPhotoURL,
         dataAiHint,
+        baseCurrency: values.baseCurrency,
         ownerId: authUser.uid,
-        members: [authUser.uid], // User who creates is the first member and owner
+        members: [authUser.uid], 
         createdAt: serverTimestamp(),
-        // You might want to initialize other fields like expenses: [], itinerary: [] etc.
       };
 
       const docRef = await addDoc(collection(db, 'trips'), tripData);
       toast({ title: 'Trip Created!', description: `Your trip "${values.name}" has been successfully created.` });
-      router.push(`/trips/${docRef.id}`); // Navigate to the new trip's detail page
+      router.push(`/trips/${docRef.id}`);
     } catch (error: any) {
       console.error("Error creating trip: ", error);
       toast({ variant: 'destructive', title: 'Error Creating Trip', description: error.message || 'Failed to create trip. Please try again.' });
@@ -110,7 +113,7 @@ export default function CreateTripPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto py-8">
       <Card className="shadow-xl">
         <CardHeader>
           <CardTitle className="text-3xl font-bold">Plan Your Next Adventure</CardTitle>
@@ -126,7 +129,7 @@ export default function CreateTripPage() {
                   <FormItem>
                     <FormLabel>Trip Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., Summer Vacation in Italy" {...field} />
+                      <Input placeholder="e.g., Himalayan Expedition" {...field} />
                     </FormControl>
                     <FormDescription>Give your trip a memorable name.</FormDescription>
                     <FormMessage />
@@ -142,7 +145,7 @@ export default function CreateTripPage() {
                     <FormControl>
                       <div className="relative">
                         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="e.g., Rome, Florence, Venice" {...field} className="pl-10" />
+                        <Input placeholder="e.g., Leh, Ladakh, India" {...field} className="pl-10" />
                       </div>
                     </FormControl>
                      <FormDescription>Where are you heading?</FormDescription>
@@ -181,7 +184,7 @@ export default function CreateTripPage() {
                             mode="single"
                             selected={field.value}
                             onSelect={field.onChange}
-                            disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) } // Disable past dates
+                            disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) }
                             initialFocus
                           />
                         </PopoverContent>
@@ -232,6 +235,34 @@ export default function CreateTripPage() {
                   )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name="baseCurrency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Base Currency</FormLabel>
+                     <div className="relative">
+                       <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="pl-10">
+                            <SelectValue placeholder="Select trip currency" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {supportedCurrencies.map(currency => (
+                            <SelectItem key={currency} value={currency}>
+                              {currency}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <FormDescription>Select the primary currency for this trip.</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="description"
