@@ -28,8 +28,6 @@ import { useState, useEffect } from 'react';
 import { Loader2, Mail, UserPlus } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
-// Member type is not explicitly used here but good for context if needed later.
-// import type { Member } from '@/app/trips/[tripId]/page';
 
 const inviteMemberFormSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -72,9 +70,8 @@ export default function InviteMemberModal({
     setIsLoading(true);
     try {
       const lowercasedEmail = values.email.toLowerCase();
-      console.log("Querying for email (lowercase):", lowercasedEmail); // Added for debugging
+      console.log("Querying for email (lowercase):", lowercasedEmail); // For user debugging
 
-      // 1. Find user by email in the 'users' collection
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('email', '==', lowercasedEmail));
       const querySnapshot = await getDocs(q);
@@ -83,7 +80,8 @@ export default function InviteMemberModal({
         toast({
           variant: 'destructive',
           title: 'User Not Found',
-          description: `No user found with the email ${values.email}. Users must have an existing WanderLedger account. Please ensure the email is correct and stored in lowercase in the database, and that the Firestore index on 'users.email' is active.`,
+          description: `No user found with email ${values.email}. Please check two things in your Firebase Console: 1) The user's email MUST be stored in ALL LOWERCASE in the 'users' collection. 2) An active Firestore index on the 'email' field (ascending) in the 'users' collection is REQUIRED.`,
+          duration: 9000, // Longer duration for important messages
         });
         setIsLoading(false);
         return;
@@ -105,7 +103,6 @@ export default function InviteMemberModal({
       const userIdToAdd = userDoc.id;
       const userDisplayName = userData.displayName || values.email;
 
-      // 2. Check if user is already a member
       if (currentMembers.includes(userIdToAdd)) {
         toast({
           variant: 'default',
@@ -116,7 +113,6 @@ export default function InviteMemberModal({
         return;
       }
 
-      // 3. Add user's UID to the trip's members array
       const tripRef = doc(db, 'trips', tripId);
       await updateDoc(tripRef, {
         members: arrayUnion(userIdToAdd),
