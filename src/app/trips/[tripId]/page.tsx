@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon } from 'lucide-react'; // Added UserPlus, MapPinIcon
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -115,7 +115,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
       dataAiHint: data.dataAiHint,
       ownerId: data.ownerId,
       members: data.members || [],
-      baseCurrency: data.baseCurrency || 'INR',
+      baseCurrency: data.baseCurrency || 'INR', // Default to INR if not set
     } as Trip;
   }
   return null;
@@ -133,6 +133,7 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
+    // Ensure all Firestore Timestamps are converted to JS Dates
     Object.keys(data).forEach(key => {
       if (data[key] instanceof FirestoreTimestamp) {
         data[key] = (data[key] as FirestoreTimestamp).toDate();
@@ -165,7 +166,7 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; 
+  const netBalance = 0; // This will be calculated properly with the "Who Owes Whom" feature
 
   return (
     <div className="space-y-6">
@@ -487,7 +488,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                      <div className="flex items-start gap-3">
                         {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
                         <div className={event.time ? "border-l pl-3 flex-grow" : "flex-grow"}>
-                            <div className="font-semibold flex items-center">
+                            <div className="font-semibold flex items-center"> {/* Changed from p to div */}
                                 <span>{event.title}</span>
                                 <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge>
                             </div>
@@ -527,7 +528,6 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
   const [newItemName, setNewItemName] = useState('');
   const [isAddingItem, setIsAddingItem] = useState(false);
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const totalItems = packingItems?.length || 0;
   const packedItemsCount = packingItems?.filter(item => item.packed).length || 0;
@@ -535,26 +535,33 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
 
   const handleAddItem = async () => {
     if (!newItemName.trim()) {
-      toast({ title: "Item name cannot be empty", variant: "destructive" });
+      toast({ title: "Item name cannot be empty", variant: "destructive", description: "Please enter a name for the packing item." });
       return;
     }
     if (!currentUser) {
-        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        toast({ title: "Authentication Error", description: "You must be logged in to add items.", variant: "destructive" });
         return;
     }
     setIsAddingItem(true);
     try {
-      await addDoc(collection(db, 'trips', tripId, 'packingItems'), {
+      const itemToAdd = {
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(),
-      });
-      setNewItemName('');
-      onPackingAction();
-      toast({ title: "Item Added", description: `"${newItemName.trim()}" added to the packing list.` });
+        createdAt: FirestoreTimestamp.now(), // Use client-side timestamp for immediate sorting
+      };
+      await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
+      
+      toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
+      setNewItemName(''); // Clear input after successful add
+      onPackingAction(); // Trigger refetch
     } catch (error: any) {
-      toast({ title: "Error Adding Item", description: error.message, variant: "destructive" });
+      console.error("Error adding packing item:", error);
+      toast({ 
+        title: "Error Adding Item", 
+        description: error.message || "An unexpected error occurred. Please try again.", 
+        variant: "destructive" 
+      });
     } finally {
       setIsAddingItem(false);
     }
@@ -562,7 +569,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
 
   const handleTogglePacked = async (item: PackingListItem) => {
     if (!currentUser) {
-        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        toast({ title: "Authentication Error", description: "You must be logged in to update items.", variant: "destructive" });
         return;
     }
     const itemRef = doc(db, 'trips', tripId, 'packingItems', item.id);
@@ -571,10 +578,14 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      // Use the callback to refetch for consistency, optimistic update is tricky with multiple users
-      onPackingAction();
+      onPackingAction(); // Trigger refetch to ensure UI consistency
     } catch (error: any) {
-      toast({ title: "Error Updating Item", description: error.message, variant: "destructive" });
+      console.error("Error updating packing item:", error);
+      toast({ 
+        title: "Error Updating Item", 
+        description: error.message || "Could not update item status.", 
+        variant: "destructive" 
+      });
     }
   };
 
@@ -592,6 +603,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
               onChange={(e) => setNewItemName(e.target.value)}
               disabled={isAddingItem}
               className="flex-grow"
+              aria-label="New packing item name"
             />
             <Button type="submit" disabled={isAddingItem || !newItemName.trim()} className="flex-shrink-0 shadow-sm hover:shadow-md transition-shadow">
               {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
@@ -600,7 +612,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
           </form>
 
           {totalItems > 0 && (
-            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Packing progress">
+            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={`Packing progress: ${packedItemsCount} of ${totalItems} items packed`}>
               <div
                 className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out"
                 style={{ width: `${progress}%` }}
@@ -665,7 +677,7 @@ export default function TripDetailPage() {
 
   const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking, refetch: refetchPackingList } = useQuery<PackingListItem[], Error>({
     queryKey: ['tripPackingList', tripId],
-    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'),
+    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'), // Order by createdAt
     enabled: !!tripId,
   });
 
@@ -675,7 +687,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000,
+      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
     })),
   });
 
@@ -689,10 +701,17 @@ export default function TripDetailPage() {
     const key = Array.isArray(queryKeyToInvalidate) ? queryKeyToInvalidate : [queryKeyToInvalidate, tripId];
     queryClient.invalidateQueries({ queryKey: key });
 
+    // Specific refetches if needed, though invalidateQueries usually handles it.
     if (queryKeyToInvalidate === 'tripDetails' || (Array.isArray(queryKeyToInvalidate) && queryKeyToInvalidate[0] === 'tripDetails')) {
-        refetchTripDetails();
-        memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
-        if (trip) queryClient.invalidateQueries({ queryKey: ['memberDetails'] });
+        refetchTripDetails(); // Refetch main trip details, which includes member UIDs
+        // Invalidate all member details if trip members list might have changed
+        if (trip) memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
+    } else if (queryKeyToInvalidate === 'tripExpenses') {
+        refetchExpenses();
+    } else if (queryKeyToInvalidate === 'tripItinerary') {
+        refetchItinerary();
+    } else if (queryKeyToInvalidate === 'tripPackingList') {
+        refetchPackingList();
     }
   };
 
@@ -806,3 +825,5 @@ export default function TripDetailPage() {
     </div>
   );
 }
+
+    
