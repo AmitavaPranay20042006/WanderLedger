@@ -29,12 +29,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import { CalendarIcon, Loader2, FileText, MapPinIcon, Tag, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, type Timestamp, type FieldValue } from 'firebase/firestore'; // Added FieldValue
 import type { ItineraryEvent } from '@/app/trips/[tripId]/page';
 
 const eventTypes = ['Activity', 'Flight', 'Train', 'Bus', 'Accommodation', 'Meeting Point', 'Note', 'Custom'];
@@ -56,13 +56,13 @@ const eventFormSchema = z.object({
     if (data.endDate && data.date > data.endDate) {
         return false;
     }
-    if (data.date.getTime() === data.endDate?.getTime() && data.time && data.endTime && data.time > data.endTime) {
+    if (data.endDate && data.date.getTime() === data.endDate.getTime() && data.time && data.endTime && data.time > data.endTime) {
         return false;
     }
     return true;
 }, {
     message: "End date/time cannot be before start date/time.",
-    path: ["endDate"], // Or a more general path
+    path: ["endDate"], 
 });
 
 
@@ -98,8 +98,7 @@ export default function AddEventModal({
     },
   });
   
-  // Reset form when modal opens
-  useState(() => {
+  useEffect(() => {
     if (isOpen) {
       form.reset({
         title: '',
@@ -112,37 +111,53 @@ export default function AddEventModal({
         notes: '',
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  });
+  }, [isOpen, form]);
 
 
   const onSubmit = async (values: EventFormValues) => {
     setIsLoading(true);
     try {
       const combineDateAndTime = (date: Date, timeStr?: string): Date => {
-        if (!timeStr) return date;
+        if (!timeStr) return date; // Return original date if no time string
         const [hours, minutes] = timeStr.split(':').map(Number);
-        const newDate = new Date(date);
-        newDate.setHours(hours, minutes, 0, 0);
+        const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes);
         return newDate;
       };
 
       const startDateWithTime = combineDateAndTime(values.date, values.time);
       const endDateWithTime = values.endDate ? combineDateAndTime(values.endDate, values.endTime) : undefined;
 
-
-      const eventData: Omit<ItineraryEvent, 'id'> & { createdAt: Timestamp } = {
+      const payload: {
+        title: string;
+        type: string;
+        date: Date; 
+        createdAt: FieldValue;
+        time?: string;
+        endDate?: Date;
+        location?: string;
+        notes?: string;
+      } = {
         title: values.title,
         type: values.type,
-        date: startDateWithTime, 
-        time: values.time || '',
-        endDate: endDateWithTime,
-        location: values.location || '',
-        notes: values.notes || '',
-        createdAt: serverTimestamp() as Timestamp,
+        date: startDateWithTime,
+        createdAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'trips', tripId, 'itineraryEvents'), eventData);
+      if (values.time) {
+        payload.time = values.time;
+      }
+      if (endDateWithTime) {
+        payload.endDate = endDateWithTime;
+      }
+      if (values.location) {
+        payload.location = values.location;
+      }
+      if (values.notes) {
+        payload.notes = values.notes;
+      }
+      // attachments are not yet part of the form
+
+      await addDoc(collection(db, 'trips', tripId, 'itineraryEvents'), payload);
       toast({ title: 'Event Added!', description: `"${values.title}" has been added to the itinerary.` });
       onEventAdded();
       onClose();
@@ -157,7 +172,7 @@ export default function AddEventModal({
   if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if(!open) onClose(); }}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl">Add New Itinerary Event</DialogTitle>
@@ -280,7 +295,7 @@ export default function AddEventModal({
                           mode="single" 
                           selected={field.value} 
                           onSelect={field.onChange} 
-                          disabled={(date) => date < (form.getValues("date") || new Date(0))}
+                          disabled={(date) => date < (form.getValues("date") || new Date(new Date().setHours(0,0,0,0)))} // Ensure end date is not before start date
                         />
                       </PopoverContent>
                     </Popover>
