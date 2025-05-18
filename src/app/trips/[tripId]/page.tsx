@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon } from 'lucide-react'; // Added UserPlus, MapPinIcon
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -18,7 +18,7 @@ import AddExpenseModal from '@/components/trips/add-expense-modal';
 import InviteMemberModal from '@/components/trips/invite-member-modal';
 import AddEventModal from '@/components/trips/add-event-modal';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox'; // Added Checkbox
+import { Checkbox } from '@/components/ui/checkbox';
 import { suggestDebtSettlement, type SuggestDebtSettlementInput, type SuggestDebtSettlementOutput } from '@/ai/flows/suggest-debt-settlement';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -34,7 +34,7 @@ import {
 
 
 // --- Data Types ---
-export interface Trip { 
+export interface Trip {
   id: string;
   name: string;
   destination: string;
@@ -44,52 +44,52 @@ export interface Trip {
   coverPhotoURL: string;
   dataAiHint: string;
   ownerId: string;
-  members: string[]; 
-  totalExpenses?: number; // This can be calculated client-side or stored
-  baseCurrency?: string; 
+  members: string[];
+  totalExpenses?: number;
+  baseCurrency?: string;
 }
 
-export interface Expense { 
+export interface Expense {
   id: string;
   description: string;
   amount: number;
-  currency: string; 
-  paidBy: string; 
-  paidByName?: string; // To be populated client-side
+  currency: string;
+  paidBy: string;
+  paidByName?: string;
   date: Date;
-  category: string; 
-  participants: string[]; 
-  splitType: 'equally' | 'unequally' | 'percentage'; 
-  notes?: string; 
-  createdAt?: Date; // Changed to Date for consistency
+  category: string;
+  participants: string[];
+  splitType: 'equally' | 'unequally' | 'percentage';
+  notes?: string;
+  createdAt?: Date;
 }
 
-export interface ItineraryEvent { 
+export interface ItineraryEvent {
   id: string;
   title: string;
   date: Date;
   time?: string;
-  type: string; // e.g., 'Activity', 'Flight', 'Accommodation'
+  type: string;
   location?: string;
   notes?: string;
-  endDate?: Date; 
-  attachments?: string[]; 
-  createdAt?: Date; // Changed to Date for consistency
+  endDate?: Date;
+  attachments?: string[];
+  createdAt?: Date;
 }
 
-export interface PackingListItem { 
+export interface PackingListItem {
   id: string;
   name: string;
   packed: boolean;
-  assignee?: string; // User ID
-  assigneeName?: string; // To be populated client-side
-  addedBy?: string; // User ID
-  lastCheckedBy?: string; // User ID
-  createdAt?: Date; // Changed to Date for consistency
+  assignee?: string;
+  assigneeName?: string;
+  addedBy?: string;
+  lastCheckedBy?: string;
+  createdAt?: Date;
 }
 
-export interface Member { 
-  id: string; 
+export interface Member {
+  id: string;
   displayName?: string | null;
   photoURL?: string | null;
   email?: string | null;
@@ -115,7 +115,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
       dataAiHint: data.dataAiHint,
       ownerId: data.ownerId,
       members: data.members || [],
-      baseCurrency: data.baseCurrency || 'INR', // Default to INR
+      baseCurrency: data.baseCurrency || 'INR',
     } as Trip;
   }
   return null;
@@ -133,7 +133,6 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
-    // Convert all Firestore Timestamps to JS Dates
     Object.keys(data).forEach(key => {
       if (data[key] instanceof FirestoreTimestamp) {
         data[key] = (data[key] as FirestoreTimestamp).toDate();
@@ -156,7 +155,6 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
       email: data.email || '',
     } as Member;
   }
-  // Fallback for UIDs not found in users collection (e.g. if user deleted account but was a member)
   return { id: userId, displayName: 'Unknown User (' + userId.substring(0,6) + '...)', photoURL: `https://placehold.co/40x40.png?text=U`, email: '' };
 }
 
@@ -164,11 +162,10 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
 // --- Tab Components ---
 
 function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses: Expense[] | undefined; currentUser: FirebaseUser | null}) {
-  const displayCurrency = trip.baseCurrency || 'INR';
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  // This is a simplified 'Your Spending'. A proper calculation would consider shared costs.
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; // Placeholder: Real calculation needs to consider shares from all expenses
+  const netBalance = 0; 
 
   return (
     <div className="space-y-6">
@@ -179,16 +176,16 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
         <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
-            <p className="text-2xl font-bold">{displayCurrency} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-2xl font-bold">{displayCurrencySymbol} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Spending (Paid by You)</h3>
-            <p className="text-2xl font-bold">{displayCurrency} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-2xl font-bold">{displayCurrencySymbol} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
             <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {displayCurrency} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              {displayCurrencySymbol} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </p>
             <p className="text-xs text-muted-foreground">AI settlement needed for details</p>
           </div>
@@ -206,18 +203,19 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
   );
 }
 
-function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction }: { 
-  tripId: string; 
-  expenses: Expense[] | undefined; 
+function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction }: {
+  tripId: string;
+  expenses: Expense[] | undefined;
   members: Member[] | undefined;
   tripCurrency: string;
-  onExpenseAction: () => void; 
+  onExpenseAction: () => void;
 }) {
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
   const [settlementPlan, setSettlementPlan] = useState<SuggestDebtSettlementOutput['settlementPlan'] | null>(null);
   const [isSuggestingSettlement, setIsSuggestingSettlement] = useState(false);
   const { toast } = useToast();
+  const displayCurrencySymbol = tripCurrency === 'INR' ? '₹' : tripCurrency;
 
   const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...";
   const getParticipantNames = (participantUIDs: string[]) => {
@@ -240,7 +238,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
         expenses: expenses.map(e => ({
           payer: e.paidBy,
           amount: e.amount,
-          currency: e.currency, 
+          currency: e.currency,
           participants: e.participants,
         })),
         members: members.map(m => m.id),
@@ -265,14 +263,14 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Expenses</h2>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          <Button 
-            onClick={() => setIsAddExpenseModalOpen(true)} 
+          <Button
+            onClick={() => setIsAddExpenseModalOpen(true)}
             className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
           >
             <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleSuggestSettlement}
             disabled={isSuggestingSettlement || !expenses || expenses.length === 0}
             className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
@@ -291,12 +289,12 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
-            onExpenseAction(); 
+            onExpenseAction();
             setIsAddExpenseModalOpen(false);
           }}
         />
       )}
-      
+
       {settlementPlan && (
         <AlertDialog open={isSettlementModalOpen} onOpenChange={setIsSettlementModalOpen}>
           <AlertDialogContent>
@@ -309,7 +307,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             <div className="my-4 space-y-2 text-sm">
               {settlementPlan.length > 0 ? settlementPlan.map((item, index) => (
                 <div key={index} className="p-3 bg-muted rounded-md">
-                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: <span className="font-semibold">{item.currency} {item.amount.toFixed(2)}</span>
+                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: <span className="font-semibold">{item.currency === 'INR' ? '₹' : item.currency} {item.amount.toFixed(2)}</span>
                 </div>
               )) : <p className="text-muted-foreground">No settlements needed or AI could not determine a plan with the current data.</p>}
             </div>
@@ -332,10 +330,10 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       <p className="text-sm text-muted-foreground">
                         Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()}
                       </p>
-                      <p className="text-lg font-medium mt-1">
-                        {exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                         <Badge variant="outline" className="ml-2 text-xs">{exp.category}</Badge>
-                      </p>
+                      <div className="text-lg font-medium mt-1 flex items-center">
+                        <span>{exp.currency === 'INR' ? '₹' : exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        <Badge variant="outline" className="ml-2 text-xs">{exp.category}</Badge>
+                      </div>
                       {exp.participants && exp.participants.length > 0 && (
                         <p className="text-xs text-muted-foreground/80 mt-1">
                           Participants: {getParticipantNames(exp.participants)}
@@ -343,11 +341,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    {/* Placeholder for Edit/Delete Buttons */}
-                    {/* <div className="flex-shrink-0 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                    </div> */}
                   </div>
                 </li>
               ))}
@@ -367,9 +360,9 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   );
 }
 
-function MembersTab({ trip, members: fetchedMembers, onMemberAction }: { 
-  trip: Trip; 
-  members: Member[] | undefined; // Renamed to avoid conflict
+function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
+  trip: Trip;
+  members: Member[] | undefined;
   onMemberAction: () => void;
 }) {
   const { user: currentUser } = useAuth();
@@ -381,8 +374,8 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Trip Members ({fetchedMembers?.length || 0})</h2>
         {isTripOwner && (
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={() => setIsInviteModalOpen(true)}
             className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
             <UserPlus className="mr-2 h-4 w-4" /> Invite Member
@@ -395,9 +388,9 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
           isOpen={isInviteModalOpen}
           onClose={() => setIsInviteModalOpen(false)}
           tripId={trip.id}
-          currentMembers={trip.members} // Pass current member UIDs
+          currentMembers={trip.members}
           onMemberInvited={() => {
-            onMemberAction(); // This will refetch trip details, which includes members array
+            onMemberAction();
             setIsInviteModalOpen(false);
           }}
         />
@@ -409,11 +402,11 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
             <ul className="divide-y">
               {fetchedMembers.map(member => (
                 <li key={member.id} className="p-4 flex items-center space-x-4 hover:bg-muted/50">
-                  <Image 
-                    src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`} 
-                    alt={member.displayName || 'Member avatar'} 
-                    width={40} height={40} 
-                    className="rounded-full" 
+                  <Image
+                    src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`}
+                    alt={member.displayName || 'Member avatar'}
+                    width={40} height={40}
+                    className="rounded-full"
                     data-ai-hint="person avatar"
                   />
                   <div>
@@ -423,7 +416,6 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
                       {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : ' (Owner)') : ''}
                     </p>
                   </div>
-                  {/* Placeholder for Admin Actions (Promote/Demote/Remove) */}
                 </li>
               ))}
             </ul>
@@ -442,14 +434,13 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
   );
 }
 
-function ItineraryTab({ tripId, itineraryEvents, onEventAction }: { 
-  tripId: string; 
+function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
+  tripId: string;
   itineraryEvents: ItineraryEvent[] | undefined;
   onEventAction: () => void;
 }) {
   const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
 
-  // Group events by date for display
   const groupedEvents = itineraryEvents?.reduce((acc, event) => {
     const dateStr = event.date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     if (!acc[dateStr]) {
@@ -464,7 +455,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Itinerary</h2>
-        <Button 
+        <Button
           onClick={() => setIsAddEventModalOpen(true)}
           className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
           <PlusCircle className="mr-2 h-4 w-4" /> Add Event
@@ -491,16 +482,19 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
             </CardHeader>
             <CardContent className="p-0">
               <ul className="divide-y">
-                {eventsOnDate.sort((a,b) => (a.time || "00:00").localeCompare(b.time || "00:00")).map(event => ( // Sort by time within day
+                {eventsOnDate.sort((a,b) => (a.time || "00:00").localeCompare(b.time || "00:00")).map(event => (
                   <li key={event.id} className="p-4 hover:bg-muted/50">
                      <div className="flex items-start gap-3">
                         {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
                         <div className={event.time ? "border-l pl-3 flex-grow" : "flex-grow"}>
-                            <p className="font-semibold">{event.title} <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge></p>
-                            {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPin className="h-3 w-3 mr-1.5"/> {event.location}</p>}
+                            <div className="font-semibold flex items-center">
+                                <span>{event.title}</span>
+                                <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge>
+                            </div>
+                            {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time && // Show only if it's a multi-day event without specific start time
+                             !event.time &&
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -524,8 +518,8 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
   );
 }
 
-function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: { 
-  tripId: string; 
+function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: {
+  tripId: string;
   packingItems: PackingListItem[] | undefined;
   onPackingAction: () => void;
   currentUser: FirebaseUser | null;
@@ -554,10 +548,10 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(), // Use Firestore Timestamp for creation
+        createdAt: FirestoreTimestamp.now(),
       });
       setNewItemName('');
-      onPackingAction(); // Refetch
+      onPackingAction();
       toast({ title: "Item Added", description: `"${newItemName.trim()}" added to the packing list.` });
     } catch (error: any) {
       toast({ title: "Error Adding Item", description: error.message, variant: "destructive" });
@@ -573,18 +567,14 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
     }
     const itemRef = doc(db, 'trips', tripId, 'packingItems', item.id);
     try {
-      await updateDoc(itemRef, { 
+      await updateDoc(itemRef, {
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      // Optimistic update (optional but good for UX)
-      queryClient.setQueryData<PackingListItem[]>(['tripPackingList', tripId], (oldData) =>
-        oldData?.map(oldItem => oldItem.id === item.id ? { ...oldItem, packed: !oldItem.packed, lastCheckedBy: currentUser.uid } : oldItem)
-      );
-      onPackingAction(); // Ensure data consistency with a refetch
+      // Use the callback to refetch for consistency, optimistic update is tricky with multiple users
+      onPackingAction();
     } catch (error: any) {
       toast({ title: "Error Updating Item", description: error.message, variant: "destructive" });
-      // Optionally revert optimistic update here if needed
     }
   };
 
@@ -594,30 +584,26 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         <h2 className="text-2xl font-semibold">Packing List ({packedItemsCount}/{totalItems} packed)</h2>
       </div>
       <Card className="shadow-sm">
-        <CardContent className="pt-6"> 
+        <CardContent className="pt-6">
           <form onSubmit={(e) => { e.preventDefault(); handleAddItem(); }} className="flex gap-2 mb-6">
-            <Input 
-              placeholder="Add new packing item (e.g., Passport, Sunscreen)" 
-              value={newItemName} 
+            <Input
+              placeholder="Add new packing item (e.g., Passport, Sunscreen)"
+              value={newItemName}
               onChange={(e) => setNewItemName(e.target.value)}
               disabled={isAddingItem}
               className="flex-grow"
             />
-            <Button type="submit" disabled={isAddingItem || !newItemName.trim()} className="flex-shrink-0">
+            <Button type="submit" disabled={isAddingItem || !newItemName.trim()} className="flex-shrink-0 shadow-sm hover:shadow-md transition-shadow">
               {isAddingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
               <span className="hidden sm:inline ml-2">Add Item</span>
             </Button>
           </form>
 
           {totalItems > 0 && (
-            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden">
-              <div 
-                className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out" 
+            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Packing progress">
+              <div
+                className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out"
                 style={{ width: `${progress}%` }}
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                role="progressbar"
               ></div>
             </div>
           )}
@@ -627,15 +613,14 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
               {packingItems.map(item => (
                 <li key={item.id} className="py-3 px-4 flex justify-between items-center hover:bg-muted/50 group">
                   <label htmlFor={`item-${item.id}`} className="flex items-center cursor-pointer flex-grow gap-3">
-                    <Checkbox 
+                    <Checkbox
                       id={`item-${item.id}`}
-                      checked={item.packed} 
+                      checked={item.packed}
                       onCheckedChange={() => handleTogglePacked(item)}
                       aria-label={`Mark ${item.name} as ${item.packed ? 'unpacked' : 'packed'}`}
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
-                  {/* Future: Assignee, Delete button (visible to admin/creator) */}
                 </li>
               ))}
             </ul>
@@ -668,10 +653,10 @@ export default function TripDetailPage() {
 
   const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses, refetch: refetchExpenses } = useQuery<Expense[], Error>({
     queryKey: ['tripExpenses', tripId],
-    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'), 
+    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'),
     enabled: !!tripId,
   });
-  
+
   const { data: itineraryEvents, isLoading: isLoadingItinerary, error: errorItinerary, refetch: refetchItinerary } = useQuery<ItineraryEvent[], Error>({
     queryKey: ['tripItinerary', tripId],
     queryFn: () => fetchSubCollection<ItineraryEvent>(tripId, 'itineraryEvents', 'id', 'date', 'asc'),
@@ -690,27 +675,23 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
+      staleTime: 15 * 60 * 1000,
     })),
   });
 
-  const members = memberQueries.every(q => q.isSuccess) 
-                ? memberQueries.map(q => q.data).filter(Boolean) as Member[] 
+  const members = memberQueries.every(q => q.isSuccess)
+                ? memberQueries.map(q => q.data).filter(Boolean) as Member[]
                 : undefined;
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
 
-  // Generic action handler to refetch specific data or all trip data
   const handleGenericAction = (queryKeyToInvalidate: string | string[]) => {
     const key = Array.isArray(queryKeyToInvalidate) ? queryKeyToInvalidate : [queryKeyToInvalidate, tripId];
     queryClient.invalidateQueries({ queryKey: key });
 
-    // If trip details (like members array) might have changed, refetch trip details and member details
     if (queryKeyToInvalidate === 'tripDetails' || (Array.isArray(queryKeyToInvalidate) && queryKeyToInvalidate[0] === 'tripDetails')) {
         refetchTripDetails();
-        // Invalidate all individual memberDetail queries if the members array might have changed
         memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
-        // And refetch the members list if the parent trip members list changed
         if (trip) queryClient.invalidateQueries({ queryKey: ['memberDetails'] });
     }
   };
@@ -743,15 +724,15 @@ export default function TripDetailPage() {
       </Card>
     );
   }
-  
+
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
       <div className="relative h-56 md:h-80 rounded-xl overflow-hidden shadow-lg group">
-        <Image 
-          src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`} 
-          alt={trip.name} 
+        <Image
+          src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`}
+          alt={trip.name}
           fill
           style={{ objectFit: 'cover' }}
           className="brightness-75 group-hover:brightness-90 transition-all duration-300"
@@ -769,10 +750,6 @@ export default function TripDetailPage() {
             <CalendarDays className="mr-2 h-3 w-3 md:h-4 md:w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </div>
-        {/* Trip Settings Button - Placeholder functionality */}
-        {/* <Button variant="outline" className="absolute top-3 right-3 md:top-4 md:right-4 bg-background/80 hover:bg-background text-foreground shadow-md hover:shadow-lg transition-all text-xs px-2 py-1 h-auto md:text-sm md:px-3 md:py-2">
-            <Settings className="mr-1 md:mr-2 h-3 w-3 md:h-4 md:w-4" /> <span className="hidden sm:inline">Settings</span>
-        </Button> */}
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
@@ -793,19 +770,19 @@ export default function TripDetailPage() {
             <ListChecks className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Packing</span>
           </TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="overview">
-          {isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> : 
+          {isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorTrip ? <p className="text-destructive">Error loading overview: {errorTrip.message}</p> :
            trip ? <TripOverviewTab trip={trip} expenses={expenses} currentUser={currentUser} /> : <p>No trip data.</p>}
         </TabsContent>
         <TabsContent value="expenses">
           {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorExpenses ? <p className="text-destructive">Error loading expenses: {errorExpenses.message}</p> :
-           trip && <ExpensesTab 
-              tripId={tripId} 
-              expenses={expenses} 
-              members={members} 
+           trip && <ExpensesTab
+              tripId={tripId}
+              expenses={expenses}
+              members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
               onExpenseAction={() => handleGenericAction('tripExpenses')}
             />}
@@ -829,4 +806,3 @@ export default function TripDetailPage() {
     </div>
   );
 }
-
