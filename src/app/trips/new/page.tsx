@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -24,7 +25,10 @@ import { useState } from 'react';
 import { CalendarIcon, Loader2, MapPin, FileText, Image as ImageIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-// TODO: Import Firebase functions for saving trip data
+import { db, storage } from '@/lib/firebase';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useAuth } from '@/contexts/auth-context';
 
 const tripFormSchema = z.object({
   name: z.string().min(3, { message: 'Trip name must be at least 3 characters.' }).max(100),
@@ -32,7 +36,7 @@ const tripFormSchema = z.object({
   startDate: z.date({ required_error: 'Start date is required.' }),
   endDate: z.date({ required_error: 'End date is required.' }),
   description: z.string().max(500).optional(),
-  coverPhoto: z.any().optional(), // Handle file upload later
+  coverPhoto: z.instanceof(File).optional().nullable(),
 }).refine(data => data.endDate >= data.startDate, {
   message: "End date cannot be before start date.",
   path: ["endDate"],
@@ -44,6 +48,7 @@ export default function CreateTripPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const { user: authUser } = useAuth();
 
   const form = useForm<TripFormValues>({
     resolver: zodResolver(tripFormSchema),
@@ -51,30 +56,57 @@ export default function CreateTripPage() {
       name: '',
       destination: '',
       description: '',
+      coverPhoto: null,
     },
   });
 
   const onSubmit = async (values: TripFormValues) => {
     setIsLoading(true);
-    console.log('Creating trip with values:', values);
-    // TODO: Implement Firebase trip creation logic
-    // Example:
-    // try {
-    //   const tripId = await createTripInFirestore(values);
-    //   toast({ title: 'Trip Created!', description: `Your trip "${values.name}" has been successfully created.` });
-    //   router.push(`/trips/${tripId}`);
-    // } catch (error) {
-    //   toast({ variant: 'destructive', title: 'Error', description: 'Failed to create trip.' });
-    // } finally {
-    //   setIsLoading(false);
-    // }
-
-    // Placeholder for now:
-    setTimeout(() => {
-      toast({ title: 'Trip Created (Mock)!', description: `Your trip "${values.name}" is ready.` });
-      router.push('/dashboard'); // Redirect to dashboard or new trip page
+    if (!authUser) {
+      toast({ variant: 'destructive', title: 'Authentication Error', description: 'You must be logged in to create a trip.' });
       setIsLoading(false);
-    }, 1500);
+      return;
+    }
+
+    try {
+      let coverPhotoURL = `https://placehold.co/600x400.png?text=${encodeURIComponent(values.name)}`;
+      let dataAiHint = `${values.destination.split(',')[0].trim().toLowerCase()} travel`; // Basic hint for placeholder
+
+      if (values.coverPhoto && values.coverPhoto instanceof File) {
+        const photoFile = values.coverPhoto;
+        const imageName = `${authUser.uid}-${Date.now()}-${photoFile.name}`;
+        const storageRef = ref(storage, `trip-covers/${imageName}`);
+        
+        const uploadTask = await uploadBytes(storageRef, photoFile);
+        coverPhotoURL = await getDownloadURL(uploadTask.ref);
+        // For a user-uploaded image, a more generic hint or one derived from filename/destination might be better
+        // Or a Genkit flow could analyze the image if desired (more complex).
+        dataAiHint = `${values.destination.split(',')[0].trim().toLowerCase()} photo`; 
+      }
+
+      const tripData = {
+        name: values.name,
+        destination: values.destination,
+        startDate: values.startDate, // Firestore handles JS Date conversion to Timestamp
+        endDate: values.endDate,
+        description: values.description || '',
+        coverPhotoURL,
+        dataAiHint,
+        ownerId: authUser.uid,
+        members: [authUser.uid], // User who creates is the first member and owner
+        createdAt: serverTimestamp(),
+        // You might want to initialize other fields like expenses: [], itinerary: [] etc.
+      };
+
+      const docRef = await addDoc(collection(db, 'trips'), tripData);
+      toast({ title: 'Trip Created!', description: `Your trip "${values.name}" has been successfully created.` });
+      router.push(`/trips/${docRef.id}`); // Navigate to the new trip's detail page
+    } catch (error: any) {
+      console.error("Error creating trip: ", error);
+      toast({ variant: 'destructive', title: 'Error Creating Trip', description: error.message || 'Failed to create trip. Please try again.' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -229,7 +261,12 @@ export default function CreateTripPage() {
                     <FormControl>
                       <div className="relative">
                         <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input type="file" accept="image/*" onChange={(e) => field.onChange(e.target.files ? e.target.files[0] : null)} className="pl-10 file:text-primary file:font-semibold file:mr-2" />
+                        <Input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={(e) => field.onChange(e.target.files ? e.target.files[0] : null)} 
+                            className="pl-10 file:text-primary file:font-semibold file:mr-2" 
+                        />
                       </div>
                     </FormControl>
                     <FormDescription>Upload an image to represent your trip.</FormDescription>
@@ -237,7 +274,7 @@ export default function CreateTripPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full" disabled={isLoading || !authUser}>
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create Trip
               </Button>

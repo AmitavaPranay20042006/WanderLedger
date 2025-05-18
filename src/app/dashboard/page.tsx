@@ -1,24 +1,52 @@
+
 'use client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
-import { PlusCircle, LayoutGrid, ListFilter, Search, FolderOpen } from 'lucide-react';
+import { PlusCircle, LayoutGrid, ListFilter, Search, FolderOpen, Loader2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useQuery } from '@tanstack/react-query';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, orderBy, Timestamp } from 'firebase/firestore';
 
-// Mock trip data for UI development
-// In a real app, this would come from Firestore
-const mockTrips = [
-  { id: '1', name: 'Paris Adventure', destination: 'Paris, France', startDate: '2024-09-15', endDate: '2024-09-22', coverPhotoURL: 'https://placehold.co/600x400.png?text=Paris+View', dataAiHint: 'paris cityscape' },
-  { id: '2', name: 'Tokyo Exploration', destination: 'Tokyo, Japan', startDate: '2024-11-01', endDate: '2024-11-10', coverPhotoURL: 'https://placehold.co/600x400.png?text=Tokyo+Skyline', dataAiHint: 'tokyo japan' },
-  { id: '3', name: 'Rome Holiday', destination: 'Rome, Italy', startDate: '2025-03-20', endDate: '2025-03-27', coverPhotoURL: 'https://placehold.co/600x400.png?text=Rome+Colosseum', dataAiHint: 'rome colosseum' },
-];
+type Trip = {
+  id: string;
+  name: string;
+  destination: string;
+  startDate: Date;
+  endDate: Date;
+  coverPhotoURL: string;
+  dataAiHint: string;
+  // Add other fields if needed, e.g., ownerId, members array
+};
 
-type Trip = typeof mockTrips[0];
+async function fetchUserTrips(userId: string | undefined): Promise<Trip[]> {
+  if (!userId) return [];
+  const tripsRef = collection(db, 'trips');
+  const q = query(
+    tripsRef,
+    where('members', 'array-contains', userId),
+    orderBy('startDate', 'desc') // You can also order by 'createdAt'
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      name: data.name,
+      destination: data.destination,
+      startDate: (data.startDate as Timestamp).toDate(), // Convert Firestore Timestamp to JS Date
+      endDate: (data.endDate as Timestamp).toDate(),     // Convert Firestore Timestamp to JS Date
+      coverPhotoURL: data.coverPhotoURL,
+      dataAiHint: data.dataAiHint || `${data.destination?.split(',')[0].trim().toLowerCase() || 'trip'} photo`, // Fallback AI hint
+    } as Trip;
+  });
+}
 
 function TripCard({ trip }: { trip: Trip }) {
   return (
@@ -28,8 +56,9 @@ function TripCard({ trip }: { trip: Trip }) {
           <Image 
             src={trip.coverPhotoURL} 
             alt={trip.name} 
-            layout="fill" 
-            objectFit="cover" 
+            fill // Replaces layout="fill" objectFit="cover" in Next.js 13+
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" // Example sizes, adjust as needed
+            style={{ objectFit: "cover" }}
             data-ai-hint={trip.dataAiHint}
           />
         </div>
@@ -39,7 +68,7 @@ function TripCard({ trip }: { trip: Trip }) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            {new Date(trip.startDate).toLocaleDateString()} - {new Date(trip.endDate).toLocaleDateString()}
+            {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </CardContent>
       </Link>
@@ -49,32 +78,65 @@ function TripCard({ trip }: { trip: Trip }) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [trips, setTrips] = useState<Trip[]>(mockTrips); // Use mockTrips for now
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'past'
 
-  // TODO: Replace with actual data fetching and filtering logic
-  const filteredTrips = trips.filter(trip => 
+  const { data: trips, isLoading, error: queryError } = useQuery<Trip[], Error>({
+    queryKey: ['trips', user?.uid],
+    queryFn: () => fetchUserTrips(user?.uid),
+    enabled: !!user, // Only run query if user is available
+  });
+
+  if (!user && !isLoading) { // Added !isLoading to prevent flash of this message
+    return <p>Loading user data or redirecting...</p>;
+  }
+  
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+        <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground text-lg">Loading your adventures...</p>
+      </div>
+    );
+  }
+
+  if (queryError) {
+    return (
+      <Card className="text-center py-12 shadow-lg border-destructive bg-destructive/5">
+        <CardHeader>
+          <div className="mx-auto bg-destructive/10 p-4 rounded-full w-fit mb-4">
+            <AlertTriangle className="h-12 w-12 text-destructive" />
+          </div>
+          <CardTitle className="text-2xl text-destructive">Oops! Something Went Wrong</CardTitle>
+          <CardDescription className="text-destructive/80">
+            We couldn&apos;t load your trips at the moment. Please try again later.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">Error: {queryError.message}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  const tripsToDisplay = trips || [];
+
+  const filteredTrips = tripsToDisplay.filter(trip => 
     trip.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     trip.destination.toLowerCase().includes(searchTerm.toLowerCase())
   ).filter(trip => {
     if (filter === 'all') return true;
-    const endDate = new Date(trip.endDate);
+    const endDate = trip.endDate; // Already a Date object
     if (filter === 'upcoming') return endDate >= new Date();
-    if (filter === 'past') return endDate < new Date();
+    if (filter === 'past') return endDate < new Date(new Date().setHours(0,0,0,0)); // Compare with start of today for 'past'
     return true;
   });
-
-  if (!user) {
-    // This should ideally be handled by AuthProvider redirect, but as a fallback:
-    return <p>Loading user data or redirecting...</p>;
-  }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Welcome, {user.displayName || 'Traveler'}!</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Welcome, {user?.displayName || 'Traveler'}!</h1>
           <p className="text-muted-foreground">Here are your travel plans. Let the adventures begin!</p>
         </div>
         <Button asChild size="lg" className="shadow-md hover:shadow-lg transition-shadow">
@@ -85,7 +147,6 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* Filters and Search */}
       <Card className="p-4 sm:p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-grow">
@@ -109,7 +170,6 @@ export default function DashboardPage() {
                 <SelectItem value="past">Past Trips</SelectItem>
               </SelectContent>
             </Select>
-            {/* Add view toggle if needed later: List/Grid */}
           </div>
         </div>
       </Card>
@@ -126,10 +186,14 @@ export default function DashboardPage() {
             <div className="mx-auto bg-secondary p-4 rounded-full w-fit mb-4">
               <FolderOpen className="h-12 w-12 text-muted-foreground" />
             </div>
-            <CardTitle className="text-2xl">No Trips Yet!</CardTitle>
+            <CardTitle className="text-2xl">
+              {searchTerm || filter !== 'all' 
+                ? "No Trips Match Your Search" 
+                : "No Trips Yet!"}
+            </CardTitle>
             <CardDescription>
               {searchTerm || filter !== 'all' 
-                ? "No trips match your current search or filter criteria." 
+                ? "Try adjusting your search or filter criteria." 
                 : "It looks like you haven't created or joined any trips. Start your next adventure now!"}
             </CardDescription>
           </CardHeader>
