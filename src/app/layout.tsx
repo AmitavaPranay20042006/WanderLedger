@@ -1,14 +1,15 @@
 
 import type { Metadata } from 'next';
-import { Open_Sans } from 'next/font/google';
+// Removed: import { Open_Sans } from 'next/font/google';
 import './globals.css';
 // Toaster, AuthProvider, Header, QueryClientProvider are now managed by AppProviders
 import { AppProviders } from '@/components/providers/app-providers';
 
-const openSans = Open_Sans({
-  subsets: ['latin'],
-  variable: '--font-open-sans',
-});
+// Removed:
+// const openSans = Open_Sans({
+//   subsets: ['latin'],
+//   variable: '--font-open-sans',
+// });
 
 export const metadata: Metadata = {
   title: 'WanderLedger - Collaborative Travel Planning',
@@ -21,7 +22,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={openSans.variable}>
+    // Removed openSans.variable from className
+    <html lang="en">
       <body className="antialiased">
         <AppProviders>
           {children}

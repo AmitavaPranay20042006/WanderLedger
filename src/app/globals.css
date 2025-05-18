@@ -3,9 +3,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Removed:
 body {
   font-family: var(--font-open-sans), sans-serif;
 }
+*/
 
 @layer base {
   :root {
@@ -98,5 +100,3 @@ body {
 @screen xs {
   /* Custom extra-small screen styles if needed, though Tailwind's `sm` is usually the smallest explicit breakpoint */
 }
-
-    
