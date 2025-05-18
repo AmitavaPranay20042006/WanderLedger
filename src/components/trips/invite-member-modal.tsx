@@ -28,7 +28,8 @@ import { useState, useEffect } from 'react';
 import { Loader2, Mail, UserPlus } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
-import type { Member } from '@/app/trips/[tripId]/page';
+// Member type is not explicitly used here but good for context if needed later.
+// import type { Member } from '@/app/trips/[tripId]/page';
 
 const inviteMemberFormSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -71,6 +72,8 @@ export default function InviteMemberModal({
     setIsLoading(true);
     try {
       const lowercasedEmail = values.email.toLowerCase();
+      console.log("Querying for email (lowercase):", lowercasedEmail); // Added for debugging
+
       // 1. Find user by email in the 'users' collection
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('email', '==', lowercasedEmail));
@@ -80,7 +83,7 @@ export default function InviteMemberModal({
         toast({
           variant: 'destructive',
           title: 'User Not Found',
-          description: `No user found with the email ${values.email}. Users must have an existing WanderLedger account.`,
+          description: `No user found with the email ${values.email}. Users must have an existing WanderLedger account. Please ensure the email is correct and stored in lowercase in the database, and that the Firestore index on 'users.email' is active.`,
         });
         setIsLoading(false);
         return;
@@ -90,7 +93,6 @@ export default function InviteMemberModal({
       const userData = userDoc.data();
       
       if (!userData) {
-        // This case should be rare if querySnapshot is not empty, but good for robustness
         toast({
           variant: 'destructive',
           title: 'User Data Error',
@@ -121,14 +123,14 @@ export default function InviteMemberModal({
       });
 
       toast({ title: 'Member Added!', description: `${userDisplayName} has been added to the trip.` });
-      onMemberInvited(); // This should trigger a refetch in the parent component
+      onMemberInvited(); 
       onClose();
     } catch (error: any) {
       console.error("Error inviting member: ", error);
       toast({ 
         variant: 'destructive', 
         title: 'Error Adding Member', 
-        description: error.message || 'Failed to add member. Please check console for details or ensure the user exists.' 
+        description: error.message || 'Failed to add member. Please check console for details or ensure the user exists and Firestore rules/indexes are correct.' 
       });
     } finally {
       setIsLoading(false);
