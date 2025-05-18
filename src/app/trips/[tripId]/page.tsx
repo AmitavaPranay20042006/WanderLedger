@@ -5,14 +5,30 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
-import { useQuery, useQueries } from '@tanstack/react-query';
+import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp } from 'firebase/firestore'; // Renamed to avoid conflict
-import type { User as FirebaseUser } from 'firebase/auth'; // For user details
+import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp } from 'firebase/firestore'; 
+import type { User as FirebaseUser } from 'firebase/auth'; 
 import { useAuth } from '@/contexts/auth-context';
+import React, { useState } from 'react';
+import AddExpenseModal from '@/components/trips/add-expense-modal'; // New Import
+import { suggestDebtSettlement, type SuggestDebtSettlementInput, type SuggestDebtSettlementOutput } from '@/ai/flows/suggest-debt-settlement';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
 
 // --- Data Types ---
 interface Trip {
@@ -26,27 +42,31 @@ interface Trip {
   dataAiHint: string;
   ownerId: string;
   members: string[]; // Array of user UIDs
-  // Calculated or denormalized fields (optional, can be calculated client-side or via functions)
   totalExpenses?: number;
+  baseCurrency?: string; // Added for future use
 }
 
-interface Expense {
+export interface Expense { // Exporting for use in modal
   id: string;
   description: string;
   amount: number;
+  currency: string; // Added
   paidBy: string; // User UID
-  paidByName?: string; // Denormalized or fetched
+  paidByName?: string; 
   date: Date;
-  category: string;
-  participants?: string[]; // Array of user UIDs
+  category: string; // Added
+  participants: string[]; // Array of user UIDs who participated
+  splitType: 'equally' | 'unequally' | 'percentage'; // For future expansion
+  notes?: string; // Added
+  createdAt?: FirestoreTimestamp; // Added
 }
 
 interface ItineraryEvent {
-  id: string;
+  id:string;
   title: string;
   date: Date;
   time?: string;
-  type: string; // e.g., 'Activity', 'Travel', 'Accommodation'
+  type: string; 
   location?: string;
   notes?: string;
 }
@@ -55,11 +75,11 @@ interface PackingListItem {
   id: string;
   name: string;
   packed: boolean;
-  assignee?: string; // User UID
-  assigneeName?: string; // Denormalized or fetched
+  assignee?: string; 
+  assigneeName?: string; 
 }
 
-interface Member {
+export interface Member { // Exporting for use in modal
   id: string; // UID
   displayName?: string | null;
   photoURL?: string | null;
@@ -86,6 +106,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
       dataAiHint: data.dataAiHint,
       ownerId: data.ownerId,
       members: data.members || [],
+      baseCurrency: data.baseCurrency || 'USD', // Default currency
     } as Trip;
   }
   return null;
@@ -94,7 +115,12 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
 async function fetchSubCollection<T>(tripId: string, subCollectionName: string, idField: string = 'id', orderByField?: string, orderByDirection: 'asc' | 'desc' = 'desc'): Promise<T[]> {
   if (!tripId) return [];
   const subCollectionRef = collection(db, 'trips', tripId, subCollectionName);
-  const q = orderByField ? query(subCollectionRef, orderBy(orderByField, orderByDirection)) : query(subCollectionRef);
+  let q;
+  if (orderByField) {
+    q = query(subCollectionRef, orderBy(orderByField, orderByDirection));
+  } else {
+    q = query(subCollectionRef);
+  }
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
@@ -102,24 +128,27 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
     if (data.date && data.date instanceof FirestoreTimestamp) {
       data.date = data.date.toDate();
     }
+    if (data.createdAt && data.createdAt instanceof FirestoreTimestamp) {
+        data.createdAt = data.createdAt.toDate();
+    }
     return { ...data, [idField]: docSnap.id } as T;
   });
 }
 
 async function fetchMemberDetails(userId: string): Promise<Member | null> {
   if (!userId) return null;
-  const userRef = doc(db, 'users', userId); // Assuming a 'users' collection
+  const userRef = doc(db, 'users', userId); 
   const userSnap = await getDoc(userRef);
   if (userSnap.exists()) {
     const data = userSnap.data();
     return {
       id: userSnap.id,
       displayName: data.displayName || 'Unknown User',
-      photoURL: data.photoURL || `https://placehold.co/40x40.png?text=${data.displayName?.[0] || 'U'}`,
+      photoURL: data.photoURL || `https://placehold.co/40x40.png?text=${data.displayName?.[0]?.toUpperCase() || 'U'}`,
       email: data.email || '',
     } as Member;
   }
-  return { id: userId, displayName: 'Unknown User', photoURL: `https://placehold.co/40x40.png?text=U` }; // Fallback
+  return { id: userId, displayName: 'Unknown User', photoURL: `https://placehold.co/40x40.png?text=U` };
 }
 
 
@@ -133,9 +162,7 @@ interface TripDataProps {
 function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses: Expense[] | undefined; currentUser: FirebaseUser | null}) {
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  // Net balance calculation is complex and depends on expense splitting logic (not implemented yet)
-  // For now, showing a placeholder or simple version
-  const netBalance = 0; // Placeholder
+  const netBalance = 0; // Placeholder, AI settlement will provide this
 
   return (
     <div className="space-y-6">
@@ -146,18 +173,18 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
         <CardContent className="grid md:grid-cols-3 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
-            <p className="text-2xl font-bold">${totalExpenses.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{trip.baseCurrency} {totalExpenses.toLocaleString()}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Spending</h3>
-            <p className="text-2xl font-bold">${yourSpending.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{trip.baseCurrency} {yourSpending.toLocaleString()}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
             <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {/* Placeholder until proper calculation */}
-              ${netBalance.toLocaleString()}
+              {trip.baseCurrency} {netBalance.toLocaleString()}
             </p>
+            <p className="text-xs text-muted-foreground">Use AI settlement for details</p>
           </div>
         </CardContent>
       </Card>
@@ -173,28 +200,152 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
   );
 }
 
-function ExpensesTab({ tripId, expenses, members }: { tripId: string; expenses: Expense[] | undefined, members: Member[] | undefined }) {
-  const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid;
+function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction }: { 
+  tripId: string; 
+  expenses: Expense[] | undefined; 
+  members: Member[] | undefined;
+  tripCurrency: string;
+  onExpenseAction: () => void; // Callback to refetch expenses
+}) {
+  const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
+  const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
+  const [settlementPlan, setSettlementPlan] = useState<SuggestDebtSettlementOutput['settlementPlan'] | null>(null);
+  const [isSuggestingSettlement, setIsSuggestingSettlement] = useState(false);
+  const { toast } = useToast();
+
+  const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...";
+  const getParticipantNames = (participantUIDs: string[]) => {
+    if (!members || !participantUIDs) return 'N/A';
+    return participantUIDs.map(uid => getMemberName(uid)).join(', ') || 'All involved';
+  };
+
+  const handleSuggestSettlement = async () => {
+    if (!expenses || expenses.length === 0 || !members || members.length === 0) {
+      toast({
+        title: "No Data for Settlement",
+        description: "Please add some expenses and members before suggesting a settlement.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsSuggestingSettlement(true);
+    try {
+      const genkitInput: SuggestDebtSettlementInput = {
+        expenses: expenses.map(e => ({
+          payer: e.paidBy,
+          amount: e.amount,
+          currency: e.currency, // Assuming expense currency, might need conversion to trip base currency
+          participants: e.participants,
+        })),
+        members: members.map(m => m.id),
+      };
+      const result = await suggestDebtSettlement(genkitInput);
+      setSettlementPlan(result.settlementPlan);
+      setIsSettlementModalOpen(true);
+    } catch (error: any) {
+      console.error("Error suggesting debt settlement:", error);
+      toast({
+        title: "AI Settlement Error",
+        description: error.message || "Could not generate settlement suggestions.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSuggestingSettlement(false);
+    }
+  };
+
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Expenses</h2>
-        <Button className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"><PlusCircle className="mr-2 h-4 w-4" /> Add Expense</Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <Button 
+            onClick={() => setIsAddExpenseModalOpen(true)} 
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+          >
+            <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
+          </Button>
+          <Button 
+            variant="secondary" 
+            onClick={handleSuggestSettlement}
+            disabled={isSuggestingSettlement || !expenses || expenses.length === 0}
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+          >
+            {isSuggestingSettlement ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Suggest Debt Settlement (AI)
+          </Button>
+        </div>
       </div>
+
+      {isAddExpenseModalOpen && members && (
+        <AddExpenseModal
+          isOpen={isAddExpenseModalOpen}
+          onClose={() => setIsAddExpenseModalOpen(false)}
+          tripId={tripId}
+          members={members}
+          tripCurrency={tripCurrency}
+          onExpenseAdded={() => {
+            onExpenseAction(); // Call prop to refetch
+            setIsAddExpenseModalOpen(false);
+          }}
+        />
+      )}
+      
+      {settlementPlan && (
+        <AlertDialog open={isSettlementModalOpen} onOpenChange={setIsSettlementModalOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Suggested Debt Settlement</AlertDialogTitle>
+              <AlertDialogDescription>
+                Here&apos;s an optimized plan to settle debts:
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="my-4 space-y-2">
+              {settlementPlan.length > 0 ? settlementPlan.map((item, index) => (
+                <div key={index} className="p-3 bg-muted rounded-md text-sm">
+                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: {item.currency} {item.amount.toFixed(2)}
+                </div>
+              )) : <p>No settlements needed or unable to determine.</p>}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogAction onClick={() => setIsSettlementModalOpen(false)}>Got it!</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+
       {expenses && expenses.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
             <ul className="divide-y">
               {expenses.map(exp => (
-                <li key={exp.id} className="p-4 hover:bg-muted/50">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center">
-                    <div>
+                <li key={exp.id} className="p-4 hover:bg-muted/50 group">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-start">
+                    <div className="flex-grow">
                       <p className="font-medium">{exp.description}</p>
                       <p className="text-sm text-muted-foreground">
-                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()} - ${exp.amount.toLocaleString()}
+                        Paid by {getMemberName(exp.paidBy)} on {exp.date.toLocaleDateString()} - {exp.currency} {exp.amount.toLocaleString()}
                       </p>
+                      <p className="text-xs text-muted-foreground/80 mt-1">Category: {exp.category}</p>
+                      {exp.participants && exp.participants.length > 0 && (
+                        <p className="text-xs text-muted-foreground/80 mt-1">
+                          Participants: {getParticipantNames(exp.participants)}
+                        </p>
+                      )}
+                       {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    <Badge variant="outline" className="mt-2 sm:mt-0">{exp.category || 'Uncategorized'}</Badge>
+                    <div className="mt-2 sm:mt-0 sm:ml-4 flex-shrink-0 flex items-center gap-2">
+                       {/* Placeholder for Edit/Delete actions - implement later
+                       <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <Edit className="h-4 w-4" />
+                       </Button>
+                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive opacity-0 group-hover:opacity-100 transition-opacity">
+                         <Trash2 className="h-4 w-4" />
+                       </Button>
+                       */}
+                    </div>
                   </div>
                 </li>
               ))}
@@ -210,9 +361,6 @@ function ExpensesTab({ tripId, expenses, members }: { tripId: string; expenses: 
             </CardContent>
         </Card>
       )}
-      <Button variant="secondary" className="w-full md:w-auto shadow-md hover:shadow-lg transition-shadow">
-        <Sparkles className="mr-2 h-4 w-4" /> Suggest Debt Settlement (AI)
-      </Button>
     </div>
   );
 }
@@ -232,7 +380,7 @@ function MembersTab({ tripId, members }: { tripId: string; members: Member[] | u
               {members.map(member => (
                 <li key={member.id} className="p-4 flex items-center space-x-3 hover:bg-muted/50">
                   <Image 
-                    src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0] || 'M'}`} 
+                    src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`} 
                     alt={member.displayName || 'Member'} 
                     width={40} height={40} 
                     className="rounded-full" 
@@ -308,7 +456,7 @@ function PackingListTab({ tripId, packingItems }: { tripId: string, packingItems
         <Button className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"><PlusCircle className="mr-2 h-4 w-4" /> Add Item</Button>
       </div>
       <Card className="shadow-sm">
-        <CardContent className="pt-6"> {/* Added pt-6 for padding */}
+        <CardContent className="pt-6"> 
           {totalItems > 0 && (
             <div className="w-full bg-muted rounded-full h-2.5 mb-4 shadow-inner">
               <div 
@@ -322,7 +470,6 @@ function PackingListTab({ tripId, packingItems }: { tripId: string, packingItems
               {packingItems.map(item => (
                 <li key={item.id} className="py-3 flex justify-between items-center hover:bg-muted/50 px-1">
                   <span className={`${item.packed ? 'line-through text-muted-foreground' : ''}`}>{item.name}</span>
-                  {/* TODO: Add checkbox to toggle packed status */}
                   <Badge variant={item.packed ? "secondary" : "outline"}>
                     {item.packed ? "Packed" : "To Pack"}
                   </Badge>
@@ -347,6 +494,8 @@ export default function TripDetailPage() {
   const params = useParams();
   const tripId = params.tripId as string;
   const { user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
+
 
   const { data: trip, isLoading: isLoadingTrip, error: errorTrip } = useQuery<Trip | null, Error>({
     queryKey: ['tripDetails', tripId],
@@ -354,9 +503,9 @@ export default function TripDetailPage() {
     enabled: !!tripId,
   });
 
-  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses } = useQuery<Expense[], Error>({
+  const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses, refetch: refetchExpenses } = useQuery<Expense[], Error>({
     queryKey: ['tripExpenses', tripId],
-    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date'),
+    queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'), // Ordered by date desc
     enabled: !!tripId,
   });
   
@@ -378,7 +527,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: Infinity, // User details don't change often
+      staleTime: 5 * 60 * 1000, // Cache member details for 5 mins
     })),
   });
 
@@ -387,6 +536,12 @@ export default function TripDetailPage() {
                 : undefined;
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
+
+  const handleExpenseAction = () => {
+    queryClient.invalidateQueries({ queryKey: ['tripExpenses', tripId] });
+    // Potentially invalidate tripDetails if totalExpenses is calculated server-side or on trip doc
+    queryClient.invalidateQueries({ queryKey: ['tripDetails', tripId] }); 
+  };
 
 
   if (isLoadingTrip || isLoadingMembers) {
@@ -417,8 +572,6 @@ export default function TripDetailPage() {
     );
   }
   
-  // Consolidate loading/error states for sub-collections for a cleaner message if needed,
-  // but individual tab components can also show their own loaders/errors.
 
   return (
     <div className="space-y-8">
@@ -475,7 +628,13 @@ export default function TripDetailPage() {
         <TabsContent value="expenses">
           {isLoadingExpenses ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorExpenses ? <p className="text-destructive">Error loading expenses: {errorExpenses.message}</p> :
-           <ExpensesTab tripId={tripId} expenses={expenses} members={members} />}
+           <ExpensesTab 
+              tripId={tripId} 
+              expenses={expenses} 
+              members={members} 
+              tripCurrency={trip.baseCurrency || 'USD'}
+              onExpenseAction={handleExpenseAction}
+            />}
         </TabsContent>
         <TabsContent value="members">
           {isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
@@ -496,5 +655,3 @@ export default function TripDetailPage() {
     </div>
   );
 }
-
-    
