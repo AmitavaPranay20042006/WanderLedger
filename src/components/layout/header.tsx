@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -33,22 +34,26 @@ export default function Header() {
 
   const getInitials = (name?: string | null) => {
     if (!name) return 'U';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+    const nameParts = name.split(' ');
+    if (nameParts.length > 1) {
+      return (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase();
+    }
+    return nameParts[0].substring(0, 2).toUpperCase();
   }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-16 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 text-xl font-bold text-primary">
+      <div className="container flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+        <Link href="/" className="flex items-center gap-2 text-primary">
           <MountainIcon className="h-6 w-6" />
-          <span>WanderLedger</span>
+          <span className="font-bold text-lg sm:text-xl">WanderLedger</span>
         </Link>
-        <nav className="flex items-center space-x-4">
+        <nav className="flex items-center space-x-2 sm:space-x-4">
           {loading ? (
             <div className="h-8 w-20 animate-pulse rounded-md bg-muted"></div>
           ) : user ? (
             <>
-              <Button variant="ghost" asChild>
+              <Button variant="ghost" asChild className="hidden sm:inline-flex">
                 <Link href="/dashboard">
                   <LayoutDashboard className="mr-2 h-4 w-4" />
                   Dashboard
@@ -56,9 +61,9 @@ export default function Header() {
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={user.photoURL || undefined} alt={user.displayName || user.email || 'User'} />
+                  <Button variant="ghost" className="relative h-9 w-9 sm:h-10 sm:w-10 rounded-full">
+                    <Avatar className="h-9 w-9 sm:h-10 sm:w-10">
+                      <AvatarImage src={user.photoURL || undefined} alt={user.displayName || user.email || 'User'} data-ai-hint="user avatar" />
                       <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
                     </Avatar>
                   </Button>
@@ -95,14 +100,14 @@ export default function Header() {
             <>
               <Button variant="ghost" asChild>
                 <Link href="/login">
-                  <LogIn className="mr-2 h-4 w-4" />
-                  Login
+                  <LogIn className="mr-0 sm:mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Login</span>
                 </Link>
               </Button>
               <Button asChild>
                 <Link href="/signup">
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Sign Up
+                  <UserPlus className="mr-0 sm:mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Sign Up</span>
                 </Link>
               </Button>
             </>
@@ -112,3 +117,5 @@ export default function Header() {
     </header>
   );
 }
+
+    
