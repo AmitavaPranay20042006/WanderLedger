@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader2, Mail, UserPlus } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
@@ -61,33 +61,54 @@ export default function InviteMemberModal({
     },
   });
 
+  useEffect(() => {
+    if (isOpen) {
+      form.reset({ email: '' });
+    }
+  }, [isOpen, form]);
+
   const onSubmit = async (values: InviteMemberFormValues) => {
     setIsLoading(true);
     try {
+      const lowercasedEmail = values.email.toLowerCase();
       // 1. Find user by email in the 'users' collection
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', values.email.toLowerCase()));
+      const q = query(usersRef, where('email', '==', lowercasedEmail));
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
         toast({
           variant: 'destructive',
           title: 'User Not Found',
-          description: `No user found with the email ${values.email}. For now, users must have an existing WanderLedger account.`,
+          description: `No user found with the email ${values.email}. Users must have an existing WanderLedger account.`,
         });
         setIsLoading(false);
         return;
       }
 
       const userDoc = querySnapshot.docs[0];
+      const userData = userDoc.data();
+      
+      if (!userData) {
+        // This case should be rare if querySnapshot is not empty, but good for robustness
+        toast({
+          variant: 'destructive',
+          title: 'User Data Error',
+          description: `Could not retrieve data for user ${values.email}.`,
+        });
+        setIsLoading(false);
+        return;
+      }
+      
       const userIdToAdd = userDoc.id;
+      const userDisplayName = userData.displayName || values.email;
 
       // 2. Check if user is already a member
       if (currentMembers.includes(userIdToAdd)) {
         toast({
           variant: 'default',
           title: 'Already a Member',
-          description: `${userDoc.data().displayName || values.email} is already a member of this trip.`,
+          description: `${userDisplayName} is already a member of this trip.`,
         });
         setIsLoading(false);
         return;
@@ -99,13 +120,16 @@ export default function InviteMemberModal({
         members: arrayUnion(userIdToAdd),
       });
 
-      toast({ title: 'Member Added!', description: `${userDoc.data().displayName || values.email} has been added to the trip.` });
-      onMemberInvited();
+      toast({ title: 'Member Added!', description: `${userDisplayName} has been added to the trip.` });
+      onMemberInvited(); // This should trigger a refetch in the parent component
       onClose();
-      form.reset();
     } catch (error: any) {
       console.error("Error inviting member: ", error);
-      toast({ variant: 'destructive', title: 'Error Adding Member', description: error.message || 'Failed to add member.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Error Adding Member', 
+        description: error.message || 'Failed to add member. Please check console for details or ensure the user exists.' 
+      });
     } finally {
       setIsLoading(false);
     }
@@ -114,7 +138,7 @@ export default function InviteMemberModal({
   if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-2xl">Invite New Member</DialogTitle>
