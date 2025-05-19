@@ -2,7 +2,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus } from 'lucide-react';
@@ -10,10 +10,10 @@ import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch, arrayRemove } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useAuth } from '@/contexts/auth-context';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AddExpenseModal from '@/components/trips/add-expense-modal';
 import InviteMemberModal from '@/components/trips/invite-member-modal';
 import AddEventModal from '@/components/trips/add-event-modal';
@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Progress } from '@/components/ui/progress';
 
 
 // --- Data Types ---
@@ -85,13 +86,13 @@ export interface PackingListItem {
   packed: boolean;
   assignee?: string;
   assigneeName?: string;
-  addedBy?: string; // UID of user who added it
-  lastCheckedBy?: string; // UID of user who last toggled packed status
+  addedBy?: string;
+  lastCheckedBy?: string;
   createdAt?: Date;
 }
 
 export interface Member {
-  id: string; // UID
+  id: string;
   displayName?: string | null;
   photoURL?: string | null;
   email?: string | null;
@@ -106,8 +107,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
 
   if (tripSnap.exists()) {
     const data = tripSnap.data();
-    // Ensure all Firestore Timestamps are converted to JS Dates
-    const processedData = { ...data };
+    const processedData = { ...data } as { [key: string]: any };
     Object.keys(processedData).forEach(key => {
         if (processedData[key] instanceof FirestoreTimestamp) {
             processedData[key] = (processedData[key] as FirestoreTimestamp).toDate();
@@ -117,7 +117,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
     return {
       id: tripSnap.id,
       ...processedData,
-      baseCurrency: data.baseCurrency || 'INR', // Default to INR if not set
+      baseCurrency: data.baseCurrency || 'INR',
     } as Trip;
   }
   return null;
@@ -135,13 +135,13 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   const snapshot = await getDocs(q);
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
-    // Ensure all Firestore Timestamps are converted to JS Dates
-    Object.keys(data).forEach(key => {
-      if (data[key] instanceof FirestoreTimestamp) {
-        data[key] = (data[key] as FirestoreTimestamp).toDate();
+    const processedData = { ...data } as { [key: string]: any };
+    Object.keys(processedData).forEach(key => {
+      if (processedData[key] instanceof FirestoreTimestamp) {
+        processedData[key] = (processedData[key] as FirestoreTimestamp).toDate();
       }
     });
-    return { ...data, [idField]: docSnap.id } as T;
+    return { ...processedData, [idField]: docSnap.id } as T;
   });
 }
 
@@ -168,7 +168,7 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; // This will be calculated properly with the "Who Owes Whom" feature
+  const netBalance = 0;
 
   return (
     <div className="space-y-6">
@@ -179,16 +179,16 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
         <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
-            <p className="text-2xl font-bold">{displayCurrencySymbol} {totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-2xl font-bold">{displayCurrencySymbol}{totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Spending (Paid by You)</h3>
-            <p className="text-2xl font-bold">{displayCurrencySymbol} {yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-2xl font-bold">{displayCurrencySymbol}{yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
             <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {displayCurrencySymbol} {netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              {displayCurrencySymbol}{netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </p>
             <p className="text-xs text-muted-foreground">AI settlement needed for details</p>
           </div>
@@ -292,7 +292,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
-            onExpenseAction(); // This will invalidate the query and refetch
+            onExpenseAction();
             setIsAddExpenseModalOpen(false);
           }}
         />
@@ -344,7 +344,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    {/* Add Edit/Delete buttons here if needed, with permission checks */}
                   </div>
                 </li>
               ))}
@@ -367,13 +366,12 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
 function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
   trip: Trip;
   members: Member[] | undefined;
-  onMemberAction: () => void; // Callback to refetch trip details and member details
+  onMemberAction: () => void;
 }) {
   const { user: currentUser } = useAuth();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<Member | null>(null);
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const isTripOwner = currentUser?.uid === trip.ownerId;
 
   const handleRemoveMember = async () => {
@@ -395,7 +393,7 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
         members: arrayRemove(memberToRemove.id)
       });
       toast({ title: "Member Removed", description: `${memberToRemove.displayName || 'Member'} has been removed from the trip.` });
-      onMemberAction(); // This will refetch trip details, which includes members array, and subsequently member details.
+      onMemberAction();
     } catch (error: any) {
       console.error("Error removing member:", error);
       toast({ title: "Error Removing Member", description: error.message || "Could not remove member.", variant: "destructive" });
@@ -478,9 +476,9 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
                     </div>
                   </div>
                   {isTripOwner && member.id !== currentUser?.uid && (
-                     <Button 
-                        variant="ghost" 
-                        size="icon" 
+                     <Button
+                        variant="ghost"
+                        size="icon"
                         className="text-muted-foreground hover:text-destructive group-hover:opacity-100 sm:opacity-0 transition-opacity"
                         onClick={() => setMemberToRemove(member)}
                         aria-label={`Remove ${member.displayName || 'member'}`}
@@ -512,6 +510,15 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
   onEventAction: () => void;
 }) {
   const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
+  const [cnFunction, setCnFunction] = useState<((...inputs: any[]) => string) | null>(null);
+
+
+  useEffect(() => {
+    import('@/lib/utils').then(utils => {
+      setCnFunction(() => utils.cn);
+    });
+  }, []);
+
 
   const groupedEvents = itineraryEvents?.reduce((acc, event) => {
     const dateStr = event.date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -546,7 +553,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
         />
       )}
 
-      {groupedEvents && Object.keys(groupedEvents).length > 0 ? (
+      {groupedEvents && Object.keys(groupedEvents).length > 0 && cnFunction ? (
         Object.entries(groupedEvents).map(([dateStr, eventsOnDate]) => (
           <Card key={dateStr} className="shadow-sm">
             <CardHeader>
@@ -558,7 +565,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                   <li key={event.id} className="p-4 hover:bg-muted/50">
                      <div className="flex items-start gap-3">
                         {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
-                        <div className={cn("flex-grow", event.time ? "border-l pl-3" : "")}>
+                        <div className={cnFunction("flex-grow", event.time ? "border-l pl-3" : "")}>
                             <div className="font-semibold flex items-center">
                                 <span>{event.title}</span>
                                 <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge>
@@ -566,7 +573,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time && // Only show if it's a multi-day event without specific start/end times
+                             !event.time &&
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -590,19 +597,85 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
   );
 }
 
-function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: {
+function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAction, currentUser }: {
   tripId: string;
   packingItems: PackingListItem[] | undefined;
   onPackingAction: () => void;
   currentUser: FirebaseUser | null;
 }) {
-  const [newItemName, setNewItemName] = useState('');
-  const [isAddingItem, setIsAddingItem] = useState(false);
+  // const [newItemName, setNewItemName] = useState('');
+  // const [isAddingItem, setIsAddingItem] = useState(false);
+  // const { toast } = useToast();
+
+  // const packingItems = initialPackingItems || [];
+  // const totalItems = packingItems.length;
+  // const packedItemsCount = packingItems.filter(item => item.packed).length;
+  // const progress = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
+
+  // const handleAddItem = async () => {
+  //   if (!newItemName.trim()) {
+  //     toast({ title: "Item name cannot be empty", variant: "destructive", description: "Please enter a name for the packing item." });
+  //     return;
+  //   }
+  //   if (!currentUser) {
+  //       toast({ title: "Authentication Error", description: "You must be logged in to add items.", variant: "destructive" });
+  //       return;
+  //   }
+  //   setIsAddingItem(true);
+  //   try {
+  //     const itemToAdd = {
+  //       name: newItemName.trim(),
+  //       packed: false,
+  //       addedBy: currentUser.uid,
+  //       createdAt: FirestoreTimestamp.now(),
+  //     };
+  //     await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
+
+  //     toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
+  //     setNewItemName('');
+  //     onPackingAction();
+  //   } catch (error: any) {
+  //     console.error("Error adding packing item:", error);
+  //     toast({
+  //       title: "Error Adding Item",
+  //       description: error.message || "An unexpected error occurred. Please try again.",
+  //       variant: "destructive"
+  //     });
+  //   } finally {
+  //     setIsAddingItem(false);
+  //   }
+  // };
+
+  // const handleTogglePacked = async (item: PackingListItem) => {
+  //   if (!currentUser) {
+  //       toast({ title: "Authentication Error", description: "You must be logged in to update items.", variant: "destructive" });
+  //       return;
+  //   }
+  //   const itemRef = doc(db, 'trips', tripId, 'packingItems', item.id);
+  //   try {
+  //     await updateDoc(itemRef, {
+  //       packed: !item.packed,
+  //       lastCheckedBy: currentUser.uid,
+  //     });
+  //     onPackingAction();
+  //   } catch (error: any) {
+  //     console.error("Error updating packing item:", error);
+  //     toast({
+  //       title: "Error Updating Item",
+  //       description: error.message || "Could not update item status.",
+  //       variant: "destructive"
+  //     });
+  //   }
+  // };
+  // Semicolons added for clarity
+  const [newItemName, setNewItemName] = useState<string>('');
+  const [isAddingItem, setIsAddingItem] = useState<boolean>(false);
   const { toast } = useToast();
 
-  const totalItems = packingItems?.length || 0;
-  const packedItemsCount = packingItems?.filter(item => item.packed).length || 0;
-  const progress = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
+  const packingItems = initialPackingItems || [];
+  const totalItems: number = packingItems.length;
+  const packedItemsCount: number = packingItems.filter(item => item.packed).length;
+  const progress: number = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
 
   const handleAddItem = async () => {
     if (!newItemName.trim()) {
@@ -619,19 +692,19 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(),
+        createdAt: FirestoreTimestamp.now(), // Firestore server timestamp
       };
       await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
-      
+
       toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
       setNewItemName('');
-      onPackingAction();
+      onPackingAction(); // Refetch packing list
     } catch (error: any) {
       console.error("Error adding packing item:", error);
-      toast({ 
-        title: "Error Adding Item", 
-        description: error.message || "An unexpected error occurred. Please try again.", 
-        variant: "destructive" 
+      toast({
+        title: "Error Adding Item",
+        description: error.message || "An unexpected error occurred. Please try again.",
+        variant: "destructive"
       });
     } finally {
       setIsAddingItem(false);
@@ -649,16 +722,17 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      onPackingAction(); // Trigger refetch
+      onPackingAction(); // Refetch packing list
     } catch (error: any) {
       console.error("Error updating packing item:", error);
-      toast({ 
-        title: "Error Updating Item", 
-        description: error.message || "Could not update item status.", 
-        variant: "destructive" 
+      toast({
+        title: "Error Updating Item",
+        description: error.message || "Could not update item status.",
+        variant: "destructive"
       });
     }
   };
+
 
  return (
     <div className="space-y-6">
@@ -683,11 +757,9 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
           </form>
 
           {totalItems > 0 && (
-            <div className="w-full bg-muted rounded-full h-2.5 mb-6 shadow-inner overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={`Packing progress: ${packedItemsCount} of ${totalItems} items packed`}>
-              <div
-                className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${progress}%` }}
-              ></div>
+            <div className="mb-6">
+              <Progress value={progress} aria-label={`Packing progress: ${packedItemsCount} of ${totalItems} items packed`} className="h-2.5"/>
+              <p className="text-xs text-muted-foreground text-right mt-1">{packedItemsCount} / {totalItems} items packed ({Math.round(progress)}%)</p>
             </div>
           )}
 
@@ -704,7 +776,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
-                  {/* Optional: Add delete button for item creator or trip owner */}
+                  {/* Future: Add delete button here, visible to item creator or trip owner */}
                 </li>
               ))}
             </ul>
@@ -713,14 +785,14 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
                  <ListChecks className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground font-semibold">Your packing list is empty.</p>
                 <p className="text-sm text-muted-foreground mt-1">Add items you need for the trip!</p>
-            </CardContent>
-        </Card>
-      )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 }
+
 
 // --- Main Page Component ---
 export default function TripDetailPage() {
@@ -728,6 +800,13 @@ export default function TripDetailPage() {
   const tripId = params.tripId as string;
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const [cnFunction, setCnFunction] = useState<((...inputs: any[]) => string) | null>(null);
+
+  useEffect(() => {
+    import('@/lib/utils').then(utils => {
+      setCnFunction(() => utils.cn);
+    }).catch(err => console.error("Failed to load cn function from utils", err));
+  }, []);
 
 
   const { data: trip, isLoading: isLoadingTrip, error: errorTrip, refetch: refetchTripDetails } = useQuery<Trip | null, Error>({
@@ -770,18 +849,15 @@ export default function TripDetailPage() {
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
 
-  const handleGenericAction = (queryKeyToInvalidate: string | string[]) => {
-    const key = Array.isArray(queryKeyToInvalidate) ? queryKeyToInvalidate : [queryKeyToInvalidate, tripId];
-    queryClient.invalidateQueries({ queryKey: key });
-
-    if (key.includes('tripDetails')) {
-        refetchTripDetails();
-        memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
-    }
-    if (key.includes('tripExpenses')) refetchExpenses();
-    if (key.includes('tripItinerary')) refetchItinerary();
-    if (key.includes('tripPackingList')) refetchPackingList();
-  };
+  const handleGenericAction = useCallback((queryKeys: string[]) => {
+    queryKeys.forEach(key => {
+      queryClient.invalidateQueries({ queryKey: [key, tripId] });
+      if (key === 'tripDetails') { // If trip details change, member list might have too
+          queryClient.invalidateQueries({queryKey: ['memberDetails']}) // This will refetch all member details
+          refetchTripDetails(); // Also refetch trip itself to get new member UIDs for useQueries
+      }
+    });
+  }, [queryClient, tripId, refetchTripDetails]);
 
 
   if (isLoadingTrip || isLoadingMembers) {
@@ -813,7 +889,7 @@ export default function TripDetailPage() {
   }
 
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
-  const { cn } = (await import('@/lib/utils')); // Dynamically import cn for ItineraryTab
+
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
@@ -872,27 +948,25 @@ export default function TripDetailPage() {
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
-              onExpenseAction={() => handleGenericAction(['tripExpenses', tripId])}
+              onExpenseAction={() => handleGenericAction(['tripExpenses'])}
             />}
         </TabsContent>
         <TabsContent value="members">
           {isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorMembers || errorTrip ? <p className="text-destructive">Error loading members: {(errorMembers || errorTrip)?.message}</p> :
-           trip && <MembersTab trip={trip} members={members} onMemberAction={() => handleGenericAction(['tripDetails', tripId])} />}
+           trip && <MembersTab trip={trip} members={members} onMemberAction={() => handleGenericAction(['tripDetails'])} />}
         </TabsContent>
         <TabsContent value="itinerary">
           {isLoadingItinerary ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorItinerary ? <p className="text-destructive">Error loading itinerary: {errorItinerary.message}</p> :
-           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} onEventAction={() => handleGenericAction(['tripItinerary', tripId])} />}
+           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} onEventAction={() => handleGenericAction(['tripItinerary'])} />}
         </TabsContent>
         <TabsContent value="packing">
           {isLoadingPacking ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorPacking ? <p className="text-destructive">Error loading packing list: {errorPacking.message}</p> :
-           <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction(['tripPackingList', tripId])} currentUser={currentUser} />}
+           <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction(['tripPackingList'])} currentUser={currentUser} />}
         </TabsContent>
       </Tabs>
     </div>
   );
 }
-
-    
