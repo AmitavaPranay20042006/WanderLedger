@@ -5,12 +5,12 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch, arrayRemove } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useAuth } from '@/contexts/auth-context';
 import React, { useState, useEffect } from 'react';
@@ -30,6 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 
@@ -47,6 +48,7 @@ export interface Trip {
   members: string[];
   totalExpenses?: number;
   baseCurrency?: string;
+  createdAt?: Date;
 }
 
 export interface Expense {
@@ -83,13 +85,13 @@ export interface PackingListItem {
   packed: boolean;
   assignee?: string;
   assigneeName?: string;
-  addedBy?: string;
-  lastCheckedBy?: string;
+  addedBy?: string; // UID of user who added it
+  lastCheckedBy?: string; // UID of user who last toggled packed status
   createdAt?: Date;
 }
 
 export interface Member {
-  id: string;
+  id: string; // UID
   displayName?: string | null;
   photoURL?: string | null;
   email?: string | null;
@@ -104,17 +106,17 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
 
   if (tripSnap.exists()) {
     const data = tripSnap.data();
+    // Ensure all Firestore Timestamps are converted to JS Dates
+    const processedData = { ...data };
+    Object.keys(processedData).forEach(key => {
+        if (processedData[key] instanceof FirestoreTimestamp) {
+            processedData[key] = (processedData[key] as FirestoreTimestamp).toDate();
+        }
+    });
+
     return {
       id: tripSnap.id,
-      name: data.name,
-      destination: data.destination,
-      startDate: (data.startDate as FirestoreTimestamp).toDate(),
-      endDate: (data.endDate as FirestoreTimestamp).toDate(),
-      description: data.description,
-      coverPhotoURL: data.coverPhotoURL,
-      dataAiHint: data.dataAiHint,
-      ownerId: data.ownerId,
-      members: data.members || [],
+      ...processedData,
       baseCurrency: data.baseCurrency || 'INR', // Default to INR if not set
     } as Trip;
   }
@@ -290,7 +292,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
-            onExpenseAction();
+            onExpenseAction(); // This will invalidate the query and refetch
             setIsAddExpenseModalOpen(false);
           }}
         />
@@ -342,6 +344,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
+                    {/* Add Edit/Delete buttons here if needed, with permission checks */}
                   </div>
                 </li>
               ))}
@@ -364,11 +367,43 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
 function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
   trip: Trip;
   members: Member[] | undefined;
-  onMemberAction: () => void;
+  onMemberAction: () => void; // Callback to refetch trip details and member details
 }) {
   const { user: currentUser } = useAuth();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<Member | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isTripOwner = currentUser?.uid === trip.ownerId;
+
+  const handleRemoveMember = async () => {
+    if (!memberToRemove || !isTripOwner || !currentUser) return;
+    if (memberToRemove.id === currentUser.uid) {
+        toast({ title: "Cannot Remove Self", description: "You cannot remove yourself as the trip owner.", variant: "destructive" });
+        setMemberToRemove(null);
+        return;
+    }
+    if (trip.members.length <= 1) {
+        toast({ title: "Cannot Remove Last Member", description: "A trip must have at least one member.", variant: "destructive" });
+        setMemberToRemove(null);
+        return;
+    }
+
+    try {
+      const tripRef = doc(db, 'trips', trip.id);
+      await updateDoc(tripRef, {
+        members: arrayRemove(memberToRemove.id)
+      });
+      toast({ title: "Member Removed", description: `${memberToRemove.displayName || 'Member'} has been removed from the trip.` });
+      onMemberAction(); // This will refetch trip details, which includes members array, and subsequently member details.
+    } catch (error: any) {
+      console.error("Error removing member:", error);
+      toast({ title: "Error Removing Member", description: error.message || "Could not remove member.", variant: "destructive" });
+    } finally {
+      setMemberToRemove(null);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -397,26 +432,62 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
         />
       )}
 
+      {memberToRemove && (
+        <AlertDialog open={!!memberToRemove} onOpenChange={(open) => !open && setMemberToRemove(null)}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Remove {memberToRemove.displayName || 'Member'}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Are you sure you want to remove {memberToRemove.displayName || 'this member'} from the trip? This action cannot be undone.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setMemberToRemove(null)}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                        onClick={handleRemoveMember}
+                        className={buttonVariants({ variant: "destructive" })}
+                    >
+                        Remove Member
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+
       {fetchedMembers && fetchedMembers.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
             <ul className="divide-y">
               {fetchedMembers.map(member => (
-                <li key={member.id} className="p-4 flex items-center space-x-4 hover:bg-muted/50">
-                  <Image
-                    src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`}
-                    alt={member.displayName || 'Member avatar'}
-                    width={40} height={40}
-                    className="rounded-full"
-                    data-ai-hint="person avatar"
-                  />
-                  <div>
-                    <p className="font-medium">{member.displayName || member.id.substring(0, 10) + "..."}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {member.id === currentUser?.uid && 'You'}
-                      {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : ' (Owner)') : ''}
-                    </p>
+                <li key={member.id} className="p-4 flex items-center justify-between space-x-4 hover:bg-muted/50 group">
+                  <div className="flex items-center space-x-4">
+                    <Image
+                      src={member.photoURL || `https://placehold.co/40x40.png?text=${member.displayName?.[0]?.toUpperCase() || 'M'}`}
+                      alt={member.displayName || 'Member avatar'}
+                      width={40} height={40}
+                      className="rounded-full"
+                      data-ai-hint="person avatar"
+                    />
+                    <div>
+                      <p className="font-medium">{member.displayName || member.id.substring(0, 10) + "..."}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {member.id === currentUser?.uid && 'You'}
+                        {member.id === trip.ownerId ? (member.id === currentUser?.uid ? ' (Owner)' : ' (Owner)') : ''}
+                      </p>
+                    </div>
                   </div>
+                  {isTripOwner && member.id !== currentUser?.uid && (
+                     <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-muted-foreground hover:text-destructive group-hover:opacity-100 sm:opacity-0 transition-opacity"
+                        onClick={() => setMemberToRemove(member)}
+                        aria-label={`Remove ${member.displayName || 'member'}`}
+                    >
+                        <UserMinus className="h-4 w-4" />
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -487,15 +558,15 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                   <li key={event.id} className="p-4 hover:bg-muted/50">
                      <div className="flex items-start gap-3">
                         {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
-                        <div className={event.time ? "border-l pl-3 flex-grow" : "flex-grow"}>
-                            <div className="font-semibold flex items-center"> {/* Changed from p to div */}
+                        <div className={cn("flex-grow", event.time ? "border-l pl-3" : "")}>
+                            <div className="font-semibold flex items-center">
                                 <span>{event.title}</span>
                                 <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge>
                             </div>
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time &&
+                             !event.time && // Only show if it's a multi-day event without specific start/end times
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -548,13 +619,13 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(), // Use client-side timestamp for immediate sorting
+        createdAt: FirestoreTimestamp.now(),
       };
       await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
       
       toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
-      setNewItemName(''); // Clear input after successful add
-      onPackingAction(); // Trigger refetch
+      setNewItemName('');
+      onPackingAction();
     } catch (error: any) {
       console.error("Error adding packing item:", error);
       toast({ 
@@ -578,7 +649,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      onPackingAction(); // Trigger refetch to ensure UI consistency
+      onPackingAction(); // Trigger refetch
     } catch (error: any) {
       console.error("Error updating packing item:", error);
       toast({ 
@@ -633,6 +704,7 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
+                  {/* Optional: Add delete button for item creator or trip owner */}
                 </li>
               ))}
             </ul>
@@ -641,8 +713,9 @@ function PackingListTab({ tripId, packingItems, onPackingAction, currentUser }: 
                  <ListChecks className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground font-semibold">Your packing list is empty.</p>
                 <p className="text-sm text-muted-foreground mt-1">Add items you need for the trip!</p>
-            </div>
-          )}
+            </CardContent>
+        </Card>
+      )}
         </CardContent>
       </Card>
     </div>
@@ -677,7 +750,7 @@ export default function TripDetailPage() {
 
   const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking, refetch: refetchPackingList } = useQuery<PackingListItem[], Error>({
     queryKey: ['tripPackingList', tripId],
-    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'), // Order by createdAt
+    queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'),
     enabled: !!tripId,
   });
 
@@ -687,7 +760,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
+      staleTime: 15 * 60 * 1000,
     })),
   });
 
@@ -701,18 +774,13 @@ export default function TripDetailPage() {
     const key = Array.isArray(queryKeyToInvalidate) ? queryKeyToInvalidate : [queryKeyToInvalidate, tripId];
     queryClient.invalidateQueries({ queryKey: key });
 
-    // Specific refetches if needed, though invalidateQueries usually handles it.
-    if (queryKeyToInvalidate === 'tripDetails' || (Array.isArray(queryKeyToInvalidate) && queryKeyToInvalidate[0] === 'tripDetails')) {
-        refetchTripDetails(); // Refetch main trip details, which includes member UIDs
-        // Invalidate all member details if trip members list might have changed
-        if (trip) memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
-    } else if (queryKeyToInvalidate === 'tripExpenses') {
-        refetchExpenses();
-    } else if (queryKeyToInvalidate === 'tripItinerary') {
-        refetchItinerary();
-    } else if (queryKeyToInvalidate === 'tripPackingList') {
-        refetchPackingList();
+    if (key.includes('tripDetails')) {
+        refetchTripDetails();
+        memberUIDs.forEach(uid => queryClient.invalidateQueries({ queryKey: ['memberDetails', uid] }));
     }
+    if (key.includes('tripExpenses')) refetchExpenses();
+    if (key.includes('tripItinerary')) refetchItinerary();
+    if (key.includes('tripPackingList')) refetchPackingList();
   };
 
 
@@ -745,6 +813,7 @@ export default function TripDetailPage() {
   }
 
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
+  const { cn } = (await import('@/lib/utils')); // Dynamically import cn for ItineraryTab
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
@@ -803,23 +872,23 @@ export default function TripDetailPage() {
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
-              onExpenseAction={() => handleGenericAction('tripExpenses')}
+              onExpenseAction={() => handleGenericAction(['tripExpenses', tripId])}
             />}
         </TabsContent>
         <TabsContent value="members">
           {isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorMembers || errorTrip ? <p className="text-destructive">Error loading members: {(errorMembers || errorTrip)?.message}</p> :
-           trip && <MembersTab trip={trip} members={members} onMemberAction={() => handleGenericAction('tripDetails')} />}
+           trip && <MembersTab trip={trip} members={members} onMemberAction={() => handleGenericAction(['tripDetails', tripId])} />}
         </TabsContent>
         <TabsContent value="itinerary">
           {isLoadingItinerary ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorItinerary ? <p className="text-destructive">Error loading itinerary: {errorItinerary.message}</p> :
-           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} onEventAction={() => handleGenericAction('tripItinerary')} />}
+           <ItineraryTab tripId={tripId} itineraryEvents={itineraryEvents} onEventAction={() => handleGenericAction(['tripItinerary', tripId])} />}
         </TabsContent>
         <TabsContent value="packing">
           {isLoadingPacking ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorPacking ? <p className="text-destructive">Error loading packing list: {errorPacking.message}</p> :
-           <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction('tripPackingList')} currentUser={currentUser} />}
+           <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction(['tripPackingList', tripId])} currentUser={currentUser} />}
         </TabsContent>
       </Tabs>
     </div>
