@@ -6,8 +6,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { useRouter, usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, db } from '@/lib/firebase'; // Ensure db is imported
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; // Import Firestore functions
+import { auth, db } from '@/lib/firebase';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore'; // Removed updateDoc as setDoc with merge handles updates
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface AuthContextType {
@@ -26,48 +26,54 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const pathname = usePathname();
 
   useEffect(() => {
-    console.log('AuthProvider: useEffect for onAuthStateChanged running');
+    console.log('AuthProvider: Subscribing to onAuthStateChanged');
     const unsubscribe = onAuthStateChanged(
       auth,
-      async (currentUser) => { // Made async to await setDoc
-        console.log('AuthProvider: onAuthStateChanged triggered. currentUser:', currentUser?.uid || null);
+      async (currentUser) => {
+        console.log('AuthProvider: onAuthStateChanged triggered. currentUser UID:', currentUser?.uid || 'null');
         setUser(currentUser);
 
         if (currentUser) {
-          console.log('AuthProvider: Current user found, attempting to write/update user document in Firestore.');
+          console.log('AuthProvider: User found (UID: %s). Preparing to write/update Firestore document.', currentUser.uid);
           const userDocRef = doc(db, 'users', currentUser.uid);
           try {
-            await setDoc(userDocRef, {
+            const emailToStore = currentUser.email?.toLowerCase() || '';
+            const displayNameToStore = currentUser.displayName || currentUser.email?.split('@')[0] || `User_${currentUser.uid.substring(0, 5)}`;
+            const photoURLToStore = currentUser.photoURL || `https://placehold.co/100x100.png?text=${(displayNameToStore[0] || 'U').toUpperCase()}`;
+
+            const userDataPayload: { [key: string]: any } = {
               uid: currentUser.uid,
-              email: currentUser.email?.toLowerCase() || '', // Store email in lowercase
-              displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User', // Fallback displayName
-              photoURL: currentUser.photoURL || `https://placehold.co/100x100.png?text=${(currentUser.displayName || currentUser.email || 'U')[0]}`, // Fallback photoURL
+              email: emailToStore,
+              displayName: displayNameToStore,
+              photoURL: photoURLToStore,
               lastLogin: serverTimestamp(),
-              // Add createdAt only if it's a new document, or ensure it's handled by merge:true correctly for updates
-              // For simplicity with merge:true, we can just set it. If it exists, it won't be overwritten by serverTimestamp typically unless field is absent.
-              // A more robust way for createdAt is to check if doc exists first, but for now this is okay with merge.
-            }, { merge: true }); // merge: true creates if not exists, updates if exists
+            };
 
-            // To ensure 'createdAt' is only set once:
-            const userDocSnapshot = await setDoc(userDocRef, { createdAt: serverTimestamp() }, { mergeFields: ['createdAt'] });
-            // This is a bit more complex; simpler to manage createdAt on initial object if using merge: true
-            // A simpler approach for createdAt with merge:true is to set it initially and let merge handle it.
-            // For a truly "only on create" timestamp with merge:true, you might read first, then write, or use a Cloud Function.
-            // Given the current setup, just including it in the main setDoc should be fine and it will be set on creation.
-            // If the document is just being updated, existing createdAt won't change due to how serverTimestamp works with merge.
+            // Check if document exists to conditionally add createdAt
+            const docSnap = await getDoc(userDocRef);
+            if (!docSnap.exists()) {
+              userDataPayload.createdAt = serverTimestamp();
+              console.log('AuthProvider: User document for UID %s does not exist. Will create with createdAt.', currentUser.uid);
+            } else {
+              console.log('AuthProvider: User document for UID %s exists. Will update (merge).', currentUser.uid);
+            }
 
-            console.log('AuthProvider: User document written/updated in Firestore for UID:', currentUser.uid);
-          } catch (dbError) {
-            console.error("AuthProvider: Error saving user to Firestore:", dbError);
-            // You might want to set an error state here or notify the user
+            await setDoc(userDocRef, userDataPayload, { merge: true });
+            console.log('AuthProvider: User document written/updated successfully for UID:', currentUser.uid);
+
+          } catch (dbError: any) {
+            console.error("AuthProvider: Error saving user to Firestore for UID %s:", currentUser.uid, dbError);
+            console.error("Firestore Error Code:", dbError.code);
+            console.error("Firestore Error Message:", dbError.message);
+            setError(dbError);
           }
         } else {
-          console.log('AuthProvider: User is signed out, no Firestore user document action.');
+          console.log('AuthProvider: No current user (signed out).');
         }
         setLoading(false);
       },
-      (err) => {
-        console.error('AuthProvider: onAuthStateChanged error:', err);
+      (err) => { // Error callback for onAuthStateChanged subscription itself
+        console.error('AuthProvider: onAuthStateChanged subscription error:', err);
         setError(err);
         setLoading(false);
       }
@@ -76,28 +82,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log('AuthProvider: Unsubscribing from onAuthStateChanged');
       unsubscribe();
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs once on mount
 
+  // Moved redirect logic to a separate useEffect
   useEffect(() => {
-    if (loading) return;
+    if (loading) {
+      console.log('AuthProvider (Redirect Logic): Auth state still loading, skipping redirect checks.');
+      return; 
+    }
 
     const publicPaths = ['/', '/login', '/signup'];
-    // Adjusted to treat root as public but redirect logged-in users from auth pages
-    const isStrictlyPublicPath = publicPaths.includes(pathname) && pathname !== '/';
     const isAuthPath = pathname === '/login' || pathname === '/signup';
 
+    console.log(`AuthProvider (Redirect Logic): User: ${user?.uid || 'null'}, Path: ${pathname}, AuthLoading: ${loading}`);
 
     if (!user && !publicPaths.includes(pathname)) {
-        console.log(`AuthProvider: No user, not a public path (${pathname}). Redirecting to /login.`);
-        router.push('/login');
+      console.log(`AuthProvider (Redirect Logic): No user, not a public path (${pathname}). Redirecting to /login.`);
+      router.push('/login');
     } else if (user && isAuthPath) {
-        console.log(`AuthProvider: User exists, on auth path (${pathname}). Redirecting to /dashboard.`);
-        router.push('/dashboard');
+      console.log(`AuthProvider (Redirect Logic): User exists, on auth path (${pathname}). Redirecting to /dashboard.`);
+      router.push('/dashboard');
+    } else {
+      console.log('AuthProvider (Redirect Logic): No redirect conditions met for current state.');
     }
   }, [user, loading, pathname, router]);
 
+
   if (loading) {
-     return (
+    console.log('AuthProvider (Render): Auth loading, rendering skeleton UI.');
+    return (
       <div className="flex flex-col min-h-screen">
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
@@ -121,14 +134,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       </div>
     );
   }
-  
-  if (user && (pathname === '/login' || pathname === '/signup')) {
-    return null; 
+
+  // These checks prevent rendering children if a redirect is imminent
+  const publicPaths = ['/', '/login', '/signup'];
+  const isAuthPath = pathname === '/login' || pathname === '/signup';
+  if (!loading && !user && !publicPaths.includes(pathname)) {
+     console.log('AuthProvider (Render): No user, protected path, redirect imminent. Returning null.');
+     return null; 
   }
-  if (!user && !['/', '/login', '/signup'].includes(pathname)) {
-     return null;
+  if (!loading && user && isAuthPath) {
+     console.log('AuthProvider (Render): User on auth path, redirect imminent. Returning null.');
+     return null; 
   }
 
+  console.log('AuthProvider (Render): Auth loaded, rendering children. User:', user?.uid || 'null');
   return (
     <AuthContext.Provider value={{ user, loading, error }}>
       {children}
