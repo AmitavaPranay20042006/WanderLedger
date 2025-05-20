@@ -30,17 +30,18 @@ import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from '@/hooks/use-toast';
-import { useState, useEffect } from 'react'; // Added useEffect
+import { useState, useEffect } from 'react';
 import { CalendarIcon, Loader2, DollarSign, StickyNote, Users, Tag, UserSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore'; // Ensured Timestamp is imported
+import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
 import type { Member } from '@/app/trips/[tripId]/page';
 import { useAuth } from '@/contexts/auth-context';
 
 const expenseCategories = ['Food', 'Transport', 'Accommodation', 'Activities', 'Shopping', 'Miscellaneous'];
 
+// Keep Zod schema for client-side validation, but payload will be simpler for debug
 const expenseFormSchema = z.object({
   description: z.string().min(1, { message: 'Description is required.' }).max(100),
   amount: z.coerce.number().min(0.01, { message: 'Amount must be greater than 0.' }),
@@ -95,7 +96,7 @@ export default function AddExpenseModal({
         date: new Date(),
         paidBy: authUser?.uid || (members.length > 0 ? members[0].id : ''),
         category: expenseCategories[0],
-        participants: members.map(m => m.id),
+        participants: members.map(m => m.id), // Default to all members participating
         notes: '',
       });
     }
@@ -109,36 +110,47 @@ export default function AddExpenseModal({
       setIsLoading(false);
       return;
     }
+    if (!tripId) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Trip ID is missing.' });
+        setIsLoading(false);
+        return;
+    }
+
+    // For debugging with simplified rules, ensure these fields are present
+    const expenseDataPayload: { [key: string]: any } = {
+      description: values.description.trim(),
+      amount: values.amount,
+      currency: tripCurrency, // Still good to send
+      date: Timestamp.fromDate(values.date), // Send as Firestore Timestamp
+      paidBy: values.paidBy, // Critical for the simplified rule
+      category: values.category, // Still good to send
+      participants: values.participants, // Still good to send
+      splitType: 'equally', // Still good to send
+      createdAt: serverTimestamp(), // Critical for the simplified rule
+    };
+
+    if (values.notes && values.notes.trim() !== '') {
+      expenseDataPayload.notes = values.notes.trim();
+    } else {
+      expenseDataPayload.notes = ''; // Send empty string if no notes
+    }
+    
+    console.log('--- Add Expense Attempt ---');
+    console.log('Current User UID:', authUser.uid);
+    console.log('Trip ID:', tripId);
+    console.log('Payload being sent to Firestore:', JSON.stringify(expenseDataPayload, null, 2));
+    // A more detailed log for timestamp objects since JSON.stringify won't show them well
+    console.log('Payload "date" field (Timestamp):', expenseDataPayload.date);
+    console.log('Payload "createdAt" field (ServerTimestamp placeholder):', expenseDataPayload.createdAt);
+
 
     try {
-      // Explicitly create the payload to avoid sending undefined fields
-      const expenseDataPayload: { [key: string]: any } = {
-        description: values.description,
-        amount: values.amount,
-        currency: tripCurrency,
-        date: Timestamp.fromDate(values.date), // Convert JS Date to Firestore Timestamp
-        paidBy: values.paidBy,
-        category: values.category,
-        participants: values.participants,
-        splitType: 'equally', 
-        createdAt: serverTimestamp(), // Use serverTimestamp for creation
-      };
-
-      if (values.notes && values.notes.trim() !== '') {
-        expenseDataPayload.notes = values.notes;
-      } else {
-        // Firestore does not allow 'undefined'. If notes is empty, omit it or send empty string.
-        // To strictly match the rule `(!('notes' in data) || data.notes == '' || ...)`, ensure it's not sent if empty
-        // Or if rules allow empty string and client sends it:
-        expenseDataPayload.notes = ''; // Or simply don't add the key if it's truly optional and empty
-      }
+      const expensesCollectionRef = collection(db, 'trips', tripId, 'expenses');
+      await addDoc(expensesCollectionRef, expenseDataPayload);
       
-      console.log('Data being sent to Firestore for new expense:', expenseDataPayload);
-
-      await addDoc(collection(db, 'trips', tripId, 'expenses'), expenseDataPayload);
       toast({ title: 'Expense Added!', description: `"${values.description}" has been added.` });
-      onExpenseAdded();
-      onClose();
+      onExpenseAdded(); // This should trigger a refetch of expenses
+      onClose(); // Close the modal
     } catch (error: any) {
       console.error("Error adding expense: ", error);
       toast({ 
@@ -374,3 +386,4 @@ export default function AddExpenseModal({
     </Dialog>
   );
 }
+
