@@ -30,13 +30,13 @@ import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import { CalendarIcon, Loader2, DollarSign, StickyNote, Users, Tag, UserSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
-import type { Member, Expense } from '@/app/trips/[tripId]/page'; // Assuming types are exported
+import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore'; // Ensured Timestamp is imported
+import type { Member } from '@/app/trips/[tripId]/page';
 import { useAuth } from '@/contexts/auth-context';
 
 const expenseCategories = ['Food', 'Transport', 'Accommodation', 'Activities', 'Shopping', 'Miscellaneous'];
@@ -82,13 +82,12 @@ export default function AddExpenseModal({
       date: new Date(),
       paidBy: authUser?.uid || '',
       category: expenseCategories[0],
-      participants: members.map(m => m.id), // Default to all members
+      participants: members.map(m => m.id),
       notes: '',
     },
   });
 
-  // Reset form when modal opens or members change
-  useState(() => {
+  useEffect(() => {
     if (isOpen) {
       form.reset({
         description: '',
@@ -100,8 +99,7 @@ export default function AddExpenseModal({
         notes: '',
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  });
+  }, [isOpen, form, authUser, members]);
 
 
   const onSubmit = async (values: ExpenseFormValues) => {
@@ -113,26 +111,41 @@ export default function AddExpenseModal({
     }
 
     try {
-      const expenseData: Omit<Expense, 'id' | 'paidByName' | 'createdAt'> & { createdAt: Timestamp } = {
+      // Explicitly create the payload to avoid sending undefined fields
+      const expenseDataPayload: { [key: string]: any } = {
         description: values.description,
         amount: values.amount,
-        currency: tripCurrency, // Using trip's base currency
-        date: values.date, // Firestore will convert to Timestamp
+        currency: tripCurrency,
+        date: Timestamp.fromDate(values.date), // Convert JS Date to Firestore Timestamp
         paidBy: values.paidBy,
         category: values.category,
         participants: values.participants,
-        notes: values.notes || '',
-        splitType: 'equally', // Default for now
-        createdAt: serverTimestamp() as Timestamp, // Firestore handles this
+        splitType: 'equally', 
+        createdAt: serverTimestamp(), // Use serverTimestamp for creation
       };
 
-      await addDoc(collection(db, 'trips', tripId, 'expenses'), expenseData);
+      if (values.notes && values.notes.trim() !== '') {
+        expenseDataPayload.notes = values.notes;
+      } else {
+        // Firestore does not allow 'undefined'. If notes is empty, omit it or send empty string.
+        // To strictly match the rule `(!('notes' in data) || data.notes == '' || ...)`, ensure it's not sent if empty
+        // Or if rules allow empty string and client sends it:
+        expenseDataPayload.notes = ''; // Or simply don't add the key if it's truly optional and empty
+      }
+      
+      console.log('Data being sent to Firestore for new expense:', expenseDataPayload);
+
+      await addDoc(collection(db, 'trips', tripId, 'expenses'), expenseDataPayload);
       toast({ title: 'Expense Added!', description: `"${values.description}" has been added.` });
-      onExpenseAdded(); // Callback to refetch expenses
-      onClose(); // Close modal
+      onExpenseAdded();
+      onClose();
     } catch (error: any) {
       console.error("Error adding expense: ", error);
-      toast({ variant: 'destructive', title: 'Error Adding Expense', description: error.message || 'Failed to add expense.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Error Adding Expense', 
+        description: error.message || 'Failed to add expense. Check console for details.' 
+      });
     } finally {
       setIsLoading(false);
     }
@@ -177,7 +190,7 @@ export default function AddExpenseModal({
                     <FormControl>
                        <div className="relative">
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input type="number" placeholder="0.00" {...field} className="pl-10" 
+                        <Input type="number" step="0.01" placeholder="0.00" {...field} className="pl-10" 
                           onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
                         />
                       </div>
@@ -361,4 +374,3 @@ export default function AddExpenseModal({
     </Dialog>
   );
 }
-
