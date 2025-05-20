@@ -22,7 +22,6 @@ type Trip = {
   endDate: Date;
   coverPhotoURL: string;
   dataAiHint: string;
-  // Add other fields if needed, e.g., ownerId, members array
 };
 
 async function fetchUserTrips(userId: string | undefined | null): Promise<Trip[]> {
@@ -57,7 +56,7 @@ async function fetchUserTrips(userId: string | undefined | null): Promise<Trip[]
     });
   } catch (error) {
     console.error("fetchUserTrips - Error executing getDocs(q):", error);
-    throw error; // Re-throw to be caught by useQuery's error handling
+    throw error; 
   }
 }
 
@@ -90,29 +89,28 @@ function TripCard({ trip }: { trip: Trip }) {
 }
 
 export default function DashboardPage() {
-  const { user, loading: authLoading } = useAuth(); // Renamed loading to authLoading
+  const { user, loading: authLoading } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'past'
 
-  // Log user state from useAuth when it changes or component mounts
   useEffect(() => {
     console.log("DashboardPage - User from useAuth():", JSON.stringify(user, null, 2));
     console.log("DashboardPage - Auth loading state:", authLoading);
   }, [user, authLoading]);
 
-  const queryEnabled = !!user && !!user.uid && !authLoading; // Query enabled only if user exists, has UID, and auth is not loading
+  const queryEnabled = !!user && !!user.uid && !authLoading;
 
-  const { data: trips, isLoading: tripsLoading, error: queryError } = useQuery<Trip[], Error>({ // Renamed loading to tripsLoading
+  const { data: trips, isLoading: tripsLoading, error: queryError } = useQuery<Trip[], Error>({
     queryKey: ['trips', user?.uid],
     queryFn: () => {
       console.log(`DashboardPage - useQuery queryFn called. User UID: ${user?.uid}`);
       if (!user?.uid) {
         console.warn("DashboardPage - useQuery queryFn: user.uid is not available, returning Promise<[]>.");
-        return Promise.resolve([]); // Should not happen if 'enabled' is correct
+        return Promise.resolve([]);
       }
       return fetchUserTrips(user.uid);
     },
-    enabled: queryEnabled, // Use the derived enabled state
+    enabled: queryEnabled,
   });
 
   useEffect(() => {
@@ -121,14 +119,14 @@ export default function DashboardPage() {
       console.error("DashboardPage - User ID at the time of query that failed:", user?.uid);
       console.error("DashboardPage - Error name:", queryError.name);
       console.error("DashboardPage - Error message:", queryError.message);
-      if ('code' in queryError) {
+      if ('code' in queryError && (queryError as any).code) { // Check if code exists and is not empty
         console.error("DashboardPage - Firebase error code:", (queryError as any).code);
       }
     }
   }, [queryError, user?.uid]);
 
 
-  if (authLoading) { // Check authLoading first
+  if (authLoading) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -137,8 +135,7 @@ export default function DashboardPage() {
     );
   }
 
-  // If auth is done, but no user (should be redirected by AuthProvider, but as a safeguard)
-  if (!user) {
+  if (!user && !authLoading) { // If auth is done, but no user
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
@@ -150,8 +147,7 @@ export default function DashboardPage() {
     );
   }
 
-  // If user is authenticated, now check for trips loading state
-  if (tripsLoading && queryEnabled) { // Only show trips loading if query is enabled
+  if (tripsLoading && queryEnabled) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -178,8 +174,8 @@ export default function DashboardPage() {
             This might be due to a "Missing or insufficient permissions" error from Firestore.
             Please check the following:
             <br />1. **Firestore Index:** Ensure the composite index for `trips` collection (`members` Array, `startDate` Descending) is active in your Firebase console. The browser console might have a direct link to create it if missing.
-            <br />2. **Data Consistency:** In your `trips` collection, verify that for user ID <code className="bg-muted px-1 rounded">{user?.uid}</code>, this ID is present in the `members` array of the trips they should see. Also, ensure all trip documents have a `members` field which is an array.
-            <br />3. **Firestore Rules:** Confirm your Firestore security rules for reading `/trips/{tripId}` correctly allow access if `request.auth.uid in resource.data.members`.
+            <br />2. **Data Consistency:** In your `trips` collection, verify that for user ID <code className="bg-muted px-1 rounded">{user?.uid}</code>, this ID is present in the `members` array of the trips they should see. Also, ensure all trip documents have a `members` field which is an array, and a `startDate` field which is a Timestamp.
+            <br />3. **Firestore Rules:** Confirm your Firestore security rules for reading `/trips/tripId` (replace tripId with the actual ID placeholder) correctly allow access if `request.auth.uid in resource.data.members`.
             <br />Check the browser console for more detailed Firebase error messages.
           </p>
         </CardContent>
@@ -196,7 +192,7 @@ export default function DashboardPage() {
     if (filter === 'all') return true;
     const endDate = trip.endDate;
     if (filter === 'upcoming') return endDate >= new Date();
-    if (filter === 'past') return endDate < new Date(new Date().setHours(0,0,0,0));
+    if (filter === 'past') return endDate < new Date(new Date().setHours(0,0,0,0)); // Compare against start of today
     return true;
   });
 
@@ -238,6 +234,8 @@ export default function DashboardPage() {
                 <SelectItem value="past">Past Trips</SelectItem>
               </SelectContent>
             </Select>
+            {/* Optional: Add a grid/list view toggle if needed later */}
+            {/* <Button variant="outline" size="icon"><LayoutGrid className="h-5 w-5" /></Button> */}
           </div>
         </div>
       </Card>
@@ -280,3 +278,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
