@@ -25,31 +25,40 @@ type Trip = {
   // Add other fields if needed, e.g., ownerId, members array
 };
 
-async function fetchUserTrips(userId: string | undefined): Promise<Trip[]> {
+async function fetchUserTrips(userId: string | undefined | null): Promise<Trip[]> {
+  console.log("fetchUserTrips: Initiated with userId:", userId);
   if (!userId) {
-    console.log("fetchUserTrips: No userId provided, returning empty array.");
+    console.warn("fetchUserTrips: No userId provided (it's undefined or null), returning empty array. Query will not run.");
     return [];
   }
-  console.log(`fetchUserTrips: Fetching trips for userId: ${userId}`);
+  console.log(`fetchUserTrips: Fetching trips for valid userId: ${userId}`);
   const tripsRef = collection(db, 'trips');
   const q = query(
     tripsRef,
     where('members', 'array-contains', userId),
     orderBy('startDate', 'desc')
   );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      name: data.name,
-      destination: data.destination,
-      startDate: (data.startDate as Timestamp).toDate(),
-      endDate: (data.endDate as Timestamp).toDate(),
-      coverPhotoURL: data.coverPhotoURL,
-      dataAiHint: data.dataAiHint || `${data.destination?.split(',')[0].trim().toLowerCase() || 'trip'} photo`,
-    } as Trip;
-  });
+  console.log("fetchUserTrips - Query being prepared:", q);
+
+  try {
+    const querySnapshot = await getDocs(q);
+    console.log(`fetchUserTrips - Query successful. Number of documents received: ${querySnapshot.docs.length}`);
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name,
+        destination: data.destination,
+        startDate: (data.startDate as Timestamp).toDate(),
+        endDate: (data.endDate as Timestamp).toDate(),
+        coverPhotoURL: data.coverPhotoURL,
+        dataAiHint: data.dataAiHint || `${data.destination?.split(',')[0].trim().toLowerCase() || 'trip'} photo`,
+      } as Trip;
+    });
+  } catch (error) {
+    console.error("fetchUserTrips - Error executing getDocs(q):", error);
+    throw error; // Re-throw to be caught by useQuery's error handling
+  }
 }
 
 function TripCard({ trip }: { trip: Trip }) {
@@ -81,35 +90,68 @@ function TripCard({ trip }: { trip: Trip }) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth(); // Renamed loading to authLoading
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'past'
 
-  const { data: trips, isLoading, error: queryError } = useQuery<Trip[], Error>({
+  // Log user state from useAuth when it changes or component mounts
+  useEffect(() => {
+    console.log("DashboardPage - User from useAuth():", JSON.stringify(user, null, 2));
+    console.log("DashboardPage - Auth loading state:", authLoading);
+  }, [user, authLoading]);
+
+  const queryEnabled = !!user && !!user.uid && !authLoading; // Query enabled only if user exists, has UID, and auth is not loading
+
+  const { data: trips, isLoading: tripsLoading, error: queryError } = useQuery<Trip[], Error>({ // Renamed loading to tripsLoading
     queryKey: ['trips', user?.uid],
-    queryFn: () => fetchUserTrips(user?.uid),
-    enabled: !!user,
+    queryFn: () => {
+      console.log(`DashboardPage - useQuery queryFn called. User UID: ${user?.uid}`);
+      if (!user?.uid) {
+        console.warn("DashboardPage - useQuery queryFn: user.uid is not available, returning Promise<[]>.");
+        return Promise.resolve([]); // Should not happen if 'enabled' is correct
+      }
+      return fetchUserTrips(user.uid);
+    },
+    enabled: queryEnabled, // Use the derived enabled state
   });
 
   useEffect(() => {
     if (queryError) {
-      console.error("Dashboard Page - Error fetching trips:", queryError);
-      console.error("User ID used for query that failed:", user?.uid);
-      console.error("Error name:", queryError.name);
-      console.error("Error message:", queryError.message);
-      // If it's a Firebase error, it might have a code property
+      console.error("DashboardPage - Error fetching trips (from useQuery error object):", queryError);
+      console.error("DashboardPage - User ID at the time of query that failed:", user?.uid);
+      console.error("DashboardPage - Error name:", queryError.name);
+      console.error("DashboardPage - Error message:", queryError.message);
       if ('code' in queryError) {
-        console.error("Firebase error code:", (queryError as any).code);
+        console.error("DashboardPage - Firebase error code:", (queryError as any).code);
       }
     }
   }, [queryError, user?.uid]);
 
 
-  if (!user && !isLoading) {
-    return <p>Loading user data or redirecting...</p>;
+  if (authLoading) { // Check authLoading first
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+        <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground text-lg">Authenticating user...</p>
+      </div>
+    );
   }
 
-  if (isLoading) {
+  // If auth is done, but no user (should be redirected by AuthProvider, but as a safeguard)
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+        <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+        <p className="text-muted-foreground text-lg">User not authenticated. Please log in.</p>
+        <Button asChild className="mt-4">
+            <Link href="/login">Go to Login</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  // If user is authenticated, now check for trips loading state
+  if (tripsLoading && queryEnabled) { // Only show trips loading if query is enabled
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -133,8 +175,12 @@ export default function DashboardPage() {
         <CardContent>
           <p className="text-sm text-muted-foreground">Error: {queryError.message}</p>
           <p className="text-xs text-muted-foreground mt-2">
-            Please ensure you have the necessary Firestore indexes and that your user data is consistent.
-            Check the browser console for more details or a link to create missing indexes.
+            This might be due to a "Missing or insufficient permissions" error from Firestore.
+            Please check the following:
+            <br />1. **Firestore Index:** Ensure the composite index for `trips` collection (`members` Array, `startDate` Descending) is active in your Firebase console. The browser console might have a direct link to create it if missing.
+            <br />2. **Data Consistency:** In your `trips` collection, verify that for user ID <code className="bg-muted px-1 rounded">{user?.uid}</code>, this ID is present in the `members` array of the trips they should see. Also, ensure all trip documents have a `members` field which is an array.
+            <br />3. **Firestore Rules:** Confirm your Firestore security rules for reading `/trips/{tripId}` correctly allow access if `request.auth.uid in resource.data.members`.
+            <br />Check the browser console for more detailed Firebase error messages.
           </p>
         </CardContent>
       </Card>
@@ -211,16 +257,16 @@ export default function DashboardPage() {
             <CardTitle className="text-2xl">
               {searchTerm || filter !== 'all'
                 ? "No Trips Match Your Search"
-                : "No Trips Yet!"}
+                : (trips && trips.length === 0 && !queryError ? "No Trips Yet!" : "Loading Trips or No Trips Found")}
             </CardTitle>
             <CardDescription>
               {searchTerm || filter !== 'all'
                 ? "Try adjusting your search or filter criteria."
-                : "It looks like you haven't created or joined any trips. Start your next adventure now!"}
+                : (trips && trips.length === 0 && !queryError ? "It looks like you haven't created or joined any trips. Start your next adventure now!" : "If you've just created a trip, it might take a moment to appear.")}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!(searchTerm || filter !== 'all') && (
+            {!(searchTerm || filter !== 'all') && (!trips || trips.length === 0) && !queryError && (
                <Button asChild className="shadow-md hover:shadow-lg transition-shadow">
                 <Link href="/trips/new">
                   <PlusCircle className="mr-2 h-5 w-5" />
