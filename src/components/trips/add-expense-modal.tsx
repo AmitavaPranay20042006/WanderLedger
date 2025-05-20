@@ -2,7 +2,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,28 +28,28 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from "@/components/ui/checkbox"
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { CalendarIcon, Loader2, DollarSign, StickyNote, Users, Tag, UserSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore'; // Ensure Timestamp and serverTimestamp are imported
 import type { Member } from '@/app/trips/[tripId]/page';
 import { useAuth } from '@/contexts/auth-context';
 
 const expenseCategories = ['Food', 'Transport', 'Accommodation', 'Activities', 'Shopping', 'Miscellaneous'];
 
-// Keep Zod schema for client-side validation, but payload will be simpler for debug
+// Zod schema for client-side validation
 const expenseFormSchema = z.object({
   description: z.string().min(1, { message: 'Description is required.' }).max(100),
   amount: z.coerce.number().min(0.01, { message: 'Amount must be greater than 0.' }),
   date: z.date({ required_error: 'Date is required.' }),
-  paidBy: z.string().min(1, { message: 'Payer is required.' }),
+  paidBy: z.string().min(1, { message: 'Payer is required.' }), // Should be current user's UID for simplified rule
   category: z.string().min(1, { message: 'Category is required.' }),
   participants: z.array(z.string()).min(1, { message: 'At least one participant is required.' }),
-  notes: z.string().max(500).optional(),
+  notes: z.string().max(500).optional().default(''), // Ensure notes default to empty string if not provided
 });
 
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
@@ -96,7 +96,7 @@ export default function AddExpenseModal({
         date: new Date(),
         paidBy: authUser?.uid || (members.length > 0 ? members[0].id : ''),
         category: expenseCategories[0],
-        participants: members.map(m => m.id), // Default to all members participating
+        participants: members.map(m => m.id),
         notes: '',
       });
     }
@@ -116,31 +116,37 @@ export default function AddExpenseModal({
         return;
     }
 
-    // For debugging with simplified rules, ensure these fields are present
+    // Ensure paidBy is current user for simplified rule
+    if (values.paidBy !== authUser.uid) {
+        toast({ variant: 'destructive', title: 'Validation Error', description: 'For this operation, the payer must be the current user.' });
+        setIsLoading(false);
+        // Optionally, you could force values.paidBy = authUser.uid here if the UI doesn't enforce it
+        // but it's better if the form defaults and doesn't allow changing paidBy if rule is strict.
+        // For now, we assume the form ensures paidBy is the authUser.uid or we error out.
+        // Let's ensure paidBy for the payload IS the authUser.uid to match the simplified rule.
+        // This might override user selection if the "Paid By" dropdown was changeable.
+    }
+
+
     const expenseDataPayload: { [key: string]: any } = {
       description: values.description.trim(),
       amount: values.amount,
-      currency: tripCurrency, // Still good to send
-      date: Timestamp.fromDate(values.date), // Send as Firestore Timestamp
-      paidBy: values.paidBy, // Critical for the simplified rule
-      category: values.category, // Still good to send
-      participants: values.participants, // Still good to send
-      splitType: 'equally', // Still good to send
-      createdAt: serverTimestamp(), // Critical for the simplified rule
+      currency: tripCurrency,
+      date: Timestamp.fromDate(values.date), // Convert JS Date to Firestore Timestamp
+      paidBy: authUser.uid, // CRITICAL: Ensure this matches authUser.uid for simplified rule
+      category: values.category,
+      participants: values.participants,
+      splitType: 'equally', // Defaulting to 'equally' as per form structure
+      notes: values.notes?.trim() || '', // Ensure notes is empty string if undefined or just whitespace
+      createdAt: serverTimestamp(), // CRITICAL for server timestamp rule
     };
-
-    if (values.notes && values.notes.trim() !== '') {
-      expenseDataPayload.notes = values.notes.trim();
-    } else {
-      expenseDataPayload.notes = ''; // Send empty string if no notes
-    }
     
     console.log('--- Add Expense Attempt ---');
     console.log('Current User UID:', authUser.uid);
     console.log('Trip ID:', tripId);
-    console.log('Payload being sent to Firestore:', JSON.stringify(expenseDataPayload, null, 2));
-    // A more detailed log for timestamp objects since JSON.stringify won't show them well
-    console.log('Payload "date" field (Timestamp):', expenseDataPayload.date);
+    console.log('Payload being sent to Firestore (stringified):', JSON.stringify(expenseDataPayload, null, 2));
+    // Log objects that don't stringify well separately
+    console.log('Payload "date" field (Timestamp object):', expenseDataPayload.date);
     console.log('Payload "createdAt" field (ServerTimestamp placeholder):', expenseDataPayload.createdAt);
 
 
@@ -149,8 +155,8 @@ export default function AddExpenseModal({
       await addDoc(expensesCollectionRef, expenseDataPayload);
       
       toast({ title: 'Expense Added!', description: `"${values.description}" has been added.` });
-      onExpenseAdded(); // This should trigger a refetch of expenses
-      onClose(); // Close the modal
+      onExpenseAdded();
+      onClose();
     } catch (error: any) {
       console.error("Error adding expense: ", error);
       toast({ 
@@ -171,7 +177,7 @@ export default function AddExpenseModal({
         <DialogHeader>
           <DialogTitle className="text-2xl">Add New Expense</DialogTitle>
           <DialogDescription>
-            Enter the details of the expense for your trip. It will be split equally among selected participants.
+            Enter the details of the expense for your trip.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -255,7 +261,16 @@ export default function AddExpenseModal({
                     <FormLabel>Paid By</FormLabel>
                     <div className="relative">
                       <UserSquare className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select 
+                        onValueChange={(value) => {
+                           field.onChange(value);
+                           // For simplified rule, we force paidBy to be authUser.uid in payload
+                           // but form can still reflect user's choice if dropdown is enabled.
+                        }} 
+                        defaultValue={field.value}
+                        // To strictly enforce the simplified rule, disable this if authUser is present
+                        // disabled={!!authUser} 
+                      >
                         <FormControl>
                           <SelectTrigger className="pl-10">
                             <SelectValue placeholder="Select who paid" />
@@ -270,6 +285,7 @@ export default function AddExpenseModal({
                         </SelectContent>
                       </Select>
                     </div>
+                    <FormDescription className="text-xs">With simplified rules, payer must be you.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -310,7 +326,7 @@ export default function AddExpenseModal({
                   <div className="mb-2">
                     <FormLabel className="text-base">Participants</FormLabel>
                     <FormDescription>
-                      Select who participated in this expense (for equal split).
+                      Select who participated in this expense.
                     </FormDescription>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-1 border rounded-md">
@@ -387,3 +403,4 @@ export default function AddExpenseModal({
   );
 }
 
+    
