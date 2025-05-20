@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { PlusCircle, LayoutGrid, ListFilter, Search, FolderOpen, Loader2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery } from '@tanstack/react-query';
@@ -26,12 +26,16 @@ type Trip = {
 };
 
 async function fetchUserTrips(userId: string | undefined): Promise<Trip[]> {
-  if (!userId) return [];
+  if (!userId) {
+    console.log("fetchUserTrips: No userId provided, returning empty array.");
+    return [];
+  }
+  console.log(`fetchUserTrips: Fetching trips for userId: ${userId}`);
   const tripsRef = collection(db, 'trips');
   const q = query(
     tripsRef,
     where('members', 'array-contains', userId),
-    orderBy('startDate', 'desc') // You can also order by 'createdAt'
+    orderBy('startDate', 'desc')
   );
   const querySnapshot = await getDocs(q);
   return querySnapshot.docs.map(doc => {
@@ -40,10 +44,10 @@ async function fetchUserTrips(userId: string | undefined): Promise<Trip[]> {
       id: doc.id,
       name: data.name,
       destination: data.destination,
-      startDate: (data.startDate as Timestamp).toDate(), // Convert Firestore Timestamp to JS Date
-      endDate: (data.endDate as Timestamp).toDate(),     // Convert Firestore Timestamp to JS Date
+      startDate: (data.startDate as Timestamp).toDate(),
+      endDate: (data.endDate as Timestamp).toDate(),
       coverPhotoURL: data.coverPhotoURL,
-      dataAiHint: data.dataAiHint || `${data.destination?.split(',')[0].trim().toLowerCase() || 'trip'} photo`, // Fallback AI hint
+      dataAiHint: data.dataAiHint || `${data.destination?.split(',')[0].trim().toLowerCase() || 'trip'} photo`,
     } as Trip;
   });
 }
@@ -53,11 +57,11 @@ function TripCard({ trip }: { trip: Trip }) {
     <Card className="overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1">
       <Link href={`/trips/${trip.id}`} className="block">
         <div className="relative h-48 w-full">
-          <Image 
-            src={trip.coverPhotoURL} 
-            alt={trip.name} 
-            fill // Replaces layout="fill" objectFit="cover" in Next.js 13+
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" // Example sizes, adjust as needed
+          <Image
+            src={trip.coverPhotoURL}
+            alt={trip.name}
+            fill
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
             style={{ objectFit: "cover" }}
             data-ai-hint={trip.dataAiHint}
           />
@@ -84,13 +88,27 @@ export default function DashboardPage() {
   const { data: trips, isLoading, error: queryError } = useQuery<Trip[], Error>({
     queryKey: ['trips', user?.uid],
     queryFn: () => fetchUserTrips(user?.uid),
-    enabled: !!user, // Only run query if user is available
+    enabled: !!user,
   });
 
-  if (!user && !isLoading) { // Added !isLoading to prevent flash of this message
+  useEffect(() => {
+    if (queryError) {
+      console.error("Dashboard Page - Error fetching trips:", queryError);
+      console.error("User ID used for query that failed:", user?.uid);
+      console.error("Error name:", queryError.name);
+      console.error("Error message:", queryError.message);
+      // If it's a Firebase error, it might have a code property
+      if ('code' in queryError) {
+        console.error("Firebase error code:", (queryError as any).code);
+      }
+    }
+  }, [queryError, user?.uid]);
+
+
+  if (!user && !isLoading) {
     return <p>Loading user data or redirecting...</p>;
   }
-  
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
@@ -114,21 +132,25 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">Error: {queryError.message}</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Please ensure you have the necessary Firestore indexes and that your user data is consistent.
+            Check the browser console for more details or a link to create missing indexes.
+          </p>
         </CardContent>
       </Card>
     );
   }
-  
+
   const tripsToDisplay = trips || [];
 
-  const filteredTrips = tripsToDisplay.filter(trip => 
-    trip.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredTrips = tripsToDisplay.filter(trip =>
+    trip.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     trip.destination.toLowerCase().includes(searchTerm.toLowerCase())
   ).filter(trip => {
     if (filter === 'all') return true;
-    const endDate = trip.endDate; // Already a Date object
+    const endDate = trip.endDate;
     if (filter === 'upcoming') return endDate >= new Date();
-    if (filter === 'past') return endDate < new Date(new Date().setHours(0,0,0,0)); // Compare with start of today for 'past'
+    if (filter === 'past') return endDate < new Date(new Date().setHours(0,0,0,0));
     return true;
   });
 
@@ -151,8 +173,8 @@ export default function DashboardPage() {
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-grow">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            <Input 
-              placeholder="Search trips by name or destination..." 
+            <Input
+              placeholder="Search trips by name or destination..."
               className="pl-10"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -187,13 +209,13 @@ export default function DashboardPage() {
               <FolderOpen className="h-12 w-12 text-muted-foreground" />
             </div>
             <CardTitle className="text-2xl">
-              {searchTerm || filter !== 'all' 
-                ? "No Trips Match Your Search" 
+              {searchTerm || filter !== 'all'
+                ? "No Trips Match Your Search"
                 : "No Trips Yet!"}
             </CardTitle>
             <CardDescription>
-              {searchTerm || filter !== 'all' 
-                ? "Try adjusting your search or filter criteria." 
+              {searchTerm || filter !== 'all'
+                ? "Try adjusting your search or filter criteria."
                 : "It looks like you haven't created or joined any trips. Start your next adventure now!"}
             </CardDescription>
           </CardHeader>
