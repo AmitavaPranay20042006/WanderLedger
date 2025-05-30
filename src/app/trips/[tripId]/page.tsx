@@ -33,7 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Progress } from '@/components/ui/progress';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend } from '@/components/ui/chart';
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart'; // Ensured ChartLegendContent is here
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend as RechartsLegend, ResponsiveContainer } from 'recharts';
 import { type ChartConfig } from '@/components/ui/chart';
 
@@ -178,7 +178,7 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const netBalance = 0; // This will be updated by AI settlement feature
 
-  const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...";
+  const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
 
   const categoryData = useMemo(() => {
     if (!expenses || expenses.length === 0) return [];
@@ -196,7 +196,14 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
         label: item.category,
         color: `hsl(var(--chart-${index % 5 + 1}))`,
       };
-      item.fill = `var(--chart-${index % 5 + 1})`;
+      // This direct mutation of `item.fill` inside `categoryChartConfig` based on `categoryData`
+      // can be problematic if `categoryData` items are shared or re-used elsewhere.
+      // It's safer to derive fill colors during rendering or in a separate mapping.
+      // However, for this specific use, it might be okay as `categoryData` seems locally scoped to `categoryChartConfig`.
+      const categoryItem = categoryData.find(cd => cd.category === item.category);
+      if (categoryItem) {
+          categoryItem.fill = `var(--chart-${index % 5 + 1})`;
+      }
     });
     return config;
   }, [categoryData]);
@@ -211,7 +218,7 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
     return Object.entries(spending).map(([memberId, amount]) => ({
       name: getMemberName(memberId),
       amount,
-      fill: 'var(--chart-1)' // Use a consistent color or cycle if desired
+      fill: 'hsl(var(--chart-1))' 
     })).sort((a,b) => b.amount - a.amount);
   }, [expenses, members, getMemberName]);
 
@@ -258,10 +265,10 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
                     <ChartTooltip content={<ChartTooltipContent nameKey="category" hideLabel />} />
                     <Pie data={categoryData} dataKey="amount" nameKey="category" labelLine={false} label={({ percent, name }) => `${name}: ${(percent * 100).toFixed(0)}%`}>
                       {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                        <Cell key={`cell-${index}`} fill={entry.fill || `hsl(var(--chart-${index % 5 + 1}))`} />
                       ))}
                     </Pie>
-                    <RechartsLegend content={({payload}) => <ChartLegendContent payload={payload} />} />
+                    <RechartsLegend content={({payload}) => <ChartLegendContent payload={payload} config={categoryChartConfig} />} />
                   </PieChart>
                 </ChartContainer>
               ) : (
@@ -319,7 +326,8 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   const { toast } = useToast();
   const displayCurrencySymbol = tripCurrency === 'INR' ? '₹' : tripCurrency;
 
-  const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...";
+  const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
+  
   const getParticipantNames = (participantUIDs: string[]) => {
     if (!members || !participantUIDs) return 'N/A';
     return participantUIDs.map(uid => getMemberName(uid)).join(', ') || 'All involved';
@@ -675,7 +683,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time &&
+                             !event.time && // Only show 'Until' if it's a multi-day event without specific start/end times on those days
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -709,7 +717,7 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
   const [isAddingItem, setIsAddingItem] = useState<boolean>(false);
   const { toast } = useToast();
 
-  const packingItems = initialPackingItems || [];
+  const packingItems = initialPackingItems || []; // Ensure packingItems is always an array
   const totalItems: number = packingItems.length;
   const packedItemsCount: number = packingItems.filter(item => item.packed).length;
   const progress: number = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
@@ -729,13 +737,13 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(),
+        createdAt: FirestoreTimestamp.now(), // Use FirestoreTimestamp for server-side timestamping
       };
       await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
 
       toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
       setNewItemName('');
-      onPackingAction();
+      onPackingAction(); // Re-fetches packing items
     } catch (error: any) {
       console.error("Error adding packing item:", error);
       toast({
@@ -757,9 +765,9 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
     try {
       await updateDoc(itemRef, {
         packed: !item.packed,
-        lastCheckedBy: currentUser.uid,
+        lastCheckedBy: currentUser.uid, // Record who last toggled
       });
-      onPackingAction(); 
+      onPackingAction(); // Re-fetches packing items
     } catch (error: any) {
       console.error("Error updating packing item:", error);
       toast({
@@ -812,6 +820,7 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
+                  {/* Optional: Add a delete button here if needed, with appropriate permissions */}
                 </li>
               ))}
             </ul>
@@ -842,7 +851,7 @@ export default function TripDetailPage() {
       setCnFunction(() => utils.cn);
     }).catch(err => {
         console.error("Failed to load cn function from utils", err);
-        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' '));
+        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' ')); // Fallback cn
     });
   }, []);
 
@@ -877,7 +886,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000,
+      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
     })),
   });
 
@@ -892,15 +901,18 @@ export default function TripDetailPage() {
     queryKeysToInvalidate.forEach(key => {
       queryClient.invalidateQueries({ queryKey: [key, tripId] });
     });
+    // If tripDetails itself changed (e.g., members list), refetch trip and then member details
     if (queryKeysToInvalidate.includes('tripDetails')) {
       refetchTripDetails().then(() => {
-        queryClient.invalidateQueries({queryKey: ['memberDetails']});
+        // After trip details are refetched, member UIDs might have changed,
+        // so invalidate member details to refetch them based on the new UIDs.
+        queryClient.invalidateQueries({queryKey: ['memberDetails']}); // Invalidate all member details queries
       });
     }
   }, [queryClient, tripId, refetchTripDetails]);
 
 
-  if (isLoadingTrip || isLoadingMembers) {
+  if (isLoadingTrip || isLoadingMembers) { // Consider all initial essential data loading
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -927,12 +939,15 @@ export default function TripDetailPage() {
       </Card>
     );
   }
+  // Optional: Add more specific error handling for sub-collections if needed,
+  // though typically if the main trip loads, sub-collections should also load if permissions are right.
 
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
 
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
+      {/* Header Section with Image and Trip Info */}
       <div className="relative h-56 md:h-80 rounded-xl overflow-hidden shadow-lg group">
         <Image
           src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`}
@@ -942,7 +957,7 @@ export default function TripDetailPage() {
           className="brightness-75 group-hover:brightness-90 transition-all duration-300"
           data-ai-hint={trip.dataAiHint || 'travel landscape'}
           sizes="(max-width: 768px) 100vw, 1200px"
-          priority
+          priority // Load hero image faster
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"></div>
         <div className="absolute bottom-0 left-0 p-4 md:p-8 text-white">
@@ -954,6 +969,7 @@ export default function TripDetailPage() {
             <CalendarDays className="mr-2 h-3 w-3 md:h-4 md:w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </div>
+        {/* Optional: Add Edit Trip Button for owner here */}
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
@@ -973,6 +989,8 @@ export default function TripDetailPage() {
           <TabsTrigger value="packing" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <ListChecks className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Packing</span>
           </TabsTrigger>
+          {/* Optional: Add Settings Tab for trip owner later */}
+          {/* <TabsTrigger value="settings" className="flex-1 py-2.5 text-sm flex items-center justify-center gap-2"><Settings className="h-4 w-4"/> Settings</TabsTrigger> */}
         </TabsList>
 
         <TabsContent value="overview">
@@ -988,7 +1006,7 @@ export default function TripDetailPage() {
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
-              onExpenseAction={() => handleGenericAction(['tripExpenses'])}
+              onExpenseAction={() => handleGenericAction(['tripExpenses'])} // Invalidate only expenses
             />}
         </TabsContent>
         <TabsContent value="members">
@@ -1006,6 +1024,9 @@ export default function TripDetailPage() {
            errorPacking ? <p className="text-destructive">Error loading packing list: {errorPacking.message}</p> :
            <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction(['tripPackingList'])} currentUser={currentUser} />}
         </TabsContent>
+        {/* <TabsContent value="settings">
+          {trip && currentUser?.uid === trip.ownerId ? <TripSettingsTab trip={trip} /> : <p>Access denied or not owner.</p>}
+        </TabsContent> */}
       </Tabs>
     </div>
   );
