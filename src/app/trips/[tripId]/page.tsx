@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus, PieChartIcon, Scale } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus, PieChartIcon, Scale, ArrowRight } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -196,7 +196,7 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
       };
       const categoryItem = categoryData.find(cd => cd.category === item.category);
       if (categoryItem) {
-          categoryItem.fill = `hsl(var(--chart-${index % 5 + 1}))`; // Ensure fill is assigned
+          categoryItem.fill = `hsl(var(--chart-${index % 5 + 1}))`; 
       }
     });
     return config;
@@ -331,7 +331,7 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
       const expenseRef = doc(db, 'trips', trip.id, 'expenses', expenseToDelete.id);
       await deleteDoc(expenseRef);
       toast({ title: "Expense Deleted", description: `"${expenseToDelete.description}" has been removed.` });
-      onExpenseAction(); // Refreshes the expense list
+      onExpenseAction(); 
     } catch (error: any) {
       console.error("Error deleting expense:", error);
       toast({ title: "Error Deleting Expense", description: error.message || "Could not delete expense.", variant: "destructive" });
@@ -366,28 +366,6 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
         />
       )}
 
-      {expenseToDelete && (
-        <AlertDialog open={!!expenseToDelete} onOpenChange={(open) => !open && setExpenseToDelete(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Expense: {expenseToDelete.description}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete this expense? This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setExpenseToDelete(null)}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteExpense}
-                className={buttonVariants({ variant: "destructive" })}
-              >
-                Delete Expense
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
-
       {expenses && expenses.length > 0 ? (
         <Card className="shadow-sm">
           <CardContent className="p-0">
@@ -410,17 +388,36 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
                     {isTripOwner && (
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive group-hover:opacity-100 sm:opacity-0 transition-opacity flex-shrink-0"
-                          onClick={() => setExpenseToDelete(exp)}
-                          aria-label={`Delete expense: ${exp.description}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
+                       <AlertDialog open={expenseToDelete?.id === exp.id} onOpenChange={(open) => { if(!open) setExpenseToDelete(null); }}>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive group-hover:opacity-100 sm:opacity-0 transition-opacity flex-shrink-0"
+                            onClick={() => setExpenseToDelete(exp)}
+                            aria-label={`Delete expense: ${exp.description}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Expense: {expenseToDelete?.description}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete this expense? This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel onClick={() => setExpenseToDelete(null)}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={handleDeleteExpense}
+                              className={buttonVariants({ variant: "destructive" })}
+                            >
+                              Delete Expense
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     )}
                   </div>
                 </li>
@@ -572,7 +569,7 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
       ) : (
         <Card className="text-center py-10 shadow-sm border-dashed">
             <CardContent>
-                <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <UserMinus className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground font-semibold">No members found.</p>
                 {isTripOwner && <p className="text-sm text-muted-foreground mt-1">Invite members to start collaborating!</p>}
             </CardContent>
@@ -833,7 +830,7 @@ function SettlementTab({ trip, expenses, members }: {
       memberId: member.id,
       memberName: getMemberName(member.id),
       balance: balances[member.id]
-    })).sort((a,b) => b.balance - a.balance); // Sort by balance descending (creditors first)
+    })).sort((a,b) => b.balance - a.balance); 
   }, [expenses, members, getMemberName]);
 
 
@@ -843,9 +840,8 @@ function SettlementTab({ trip, expenses, members }: {
     const transactions: Array<{from: string, to: string, amount: number}> = [];
     const balancesCopy = JSON.parse(JSON.stringify(memberBalances.map(mb => ({ id: mb.memberId, name: mb.memberName, balance: mb.balance }))));
     
-    // Separate debtors and creditors
-    let debtors = balancesCopy.filter((m: any) => m.balance < 0).sort((a: any, b: any) => a.balance - b.balance); // Most negative first
-    let creditors = balancesCopy.filter((m: any) => m.balance > 0).sort((a: any, b: any) => b.balance - a.balance); // Most positive first
+    let debtors = balancesCopy.filter((m: any) => m.balance < 0).sort((a: any, b: any) => a.balance - b.balance); 
+    let creditors = balancesCopy.filter((m: any) => m.balance > 0).sort((a: any, b: any) => b.balance - a.balance); 
 
     let debtorIndex = 0;
     let creditorIndex = 0;
@@ -855,7 +851,7 @@ function SettlementTab({ trip, expenses, members }: {
       const creditor = creditors[creditorIndex];
       const amountToTransfer = Math.min(-debtor.balance, creditor.balance);
 
-      if (amountToTransfer > 0.005) { // Threshold to avoid tiny transactions due to float precision
+      if (amountToTransfer > 0.005) { 
         transactions.push({
           from: debtor.name,
           to: creditor.name,
@@ -921,10 +917,18 @@ function SettlementTab({ trip, expenses, members }: {
         </CardHeader>
         <CardContent>
           {settlementTransactions.length > 0 ? (
-            <ul className="space-y-3">
+            <ul className="space-y-4">
               {settlementTransactions.map((txn, index) => (
-                <li key={index} className="p-4 bg-muted rounded-lg shadow-sm text-sm">
-                  <span className="font-semibold text-primary">{txn.from}</span> should pay <span className="font-semibold text-primary">{txn.to}</span>: <strong className="text-lg">{displayCurrencySymbol}{txn.amount.toFixed(2)}</strong>
+                <li key={index} className="p-4 border rounded-lg shadow-sm bg-background hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                       {/* Consider adding User icons/avatars here in future if Member object contains photoURL */}
+                      <span className="font-semibold text-primary text-sm break-all">{txn.from}</span>
+                      <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                      <span className="font-semibold text-primary text-sm break-all">{txn.to}</span>
+                    </div>
+                    <strong className="text-lg font-semibold whitespace-nowrap">{displayCurrencySymbol}{txn.amount.toFixed(2)}</strong>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -1066,7 +1070,7 @@ export default function TripDetailPage() {
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
+        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-6 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
           <TabsTrigger value="overview" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <BarChart3 className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Overview</span>
           </TabsTrigger>
@@ -1128,6 +1132,3 @@ export default function TripDetailPage() {
     </div>
   );
 }
-
-
-    
