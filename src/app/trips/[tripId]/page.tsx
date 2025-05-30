@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus, PieChartIcon } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus, PieChartIcon, Scale } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,6 @@ import InviteMemberModal from '@/components/trips/invite-member-modal';
 import AddEventModal from '@/components/trips/add-event-modal';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { suggestDebtSettlement, type SuggestDebtSettlementInput, type SuggestDebtSettlementOutput } from '@/ai/flows/suggest-debt-settlement';
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -33,7 +32,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Progress } from '@/components/ui/progress';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart'; // Ensured ChartLegendContent is here
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend as RechartsLegend, ResponsiveContainer } from 'recharts';
 import { type ChartConfig } from '@/components/ui/chart';
 
@@ -61,11 +60,11 @@ export interface Expense {
   amount: number;
   currency: string;
   paidBy: string;
-  paidByName?: string; // Optional: Will be populated if member details are fetched
+  paidByName?: string;
   date: Date;
   category: string;
   participants: string[];
-  splitType: 'equally' | 'unequally' | 'percentage'; // Added for future use
+  splitType: 'equally' | 'unequally' | 'percentage';
   notes?: string;
   createdAt?: Date;
 }
@@ -75,11 +74,11 @@ export interface ItineraryEvent {
   title: string;
   date: Date;
   time?: string;
-  type: string; // E.g., 'Flight', 'Accommodation', 'Activity'
+  type: string;
   location?: string;
   notes?: string;
-  endDate?: Date; // For multi-day events or reservations
-  attachments?: string[]; // URLs to tickets, confirmations, etc.
+  endDate?: Date;
+  attachments?: string[];
   createdAt?: Date;
 }
 
@@ -87,10 +86,10 @@ export interface PackingListItem {
   id: string;
   name: string;
   packed: boolean;
-  assignee?: string; // UID of member assigned to bring it (optional)
-  assigneeName?: string; // Populated if assignee UID exists
-  addedBy?: string; // UID of member who added it
-  lastCheckedBy?: string; // UID of member who last toggled 'packed'
+  assignee?: string;
+  assigneeName?: string;
+  addedBy?: string;
+  lastCheckedBy?: string;
   createdAt?: Date;
 }
 
@@ -176,7 +175,6 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  const netBalance = 0; // This will be updated by AI settlement feature
 
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
 
@@ -196,10 +194,6 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
         label: item.category,
         color: `hsl(var(--chart-${index % 5 + 1}))`,
       };
-      // This direct mutation of `item.fill` inside `categoryChartConfig` based on `categoryData`
-      // can be problematic if `categoryData` items are shared or re-used elsewhere.
-      // It's safer to derive fill colors during rendering or in a separate mapping.
-      // However, for this specific use, it might be okay as `categoryData` seems locally scoped to `categoryChartConfig`.
       const categoryItem = categoryData.find(cd => cd.category === item.category);
       if (categoryItem) {
           categoryItem.fill = `var(--chart-${index % 5 + 1})`;
@@ -207,7 +201,6 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
     });
     return config;
   }, [categoryData]);
-
 
   const memberSpendingData = useMemo(() => {
     if (!expenses || expenses.length === 0 || !members || members.length === 0) return [];
@@ -226,28 +219,20 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
     amount: { label: "Amount Spent", color: "hsl(var(--chart-1))" },
   } satisfies ChartConfig;
 
-
   return (
     <div className="space-y-6">
       <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Trip Summary</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 bg-muted rounded-lg shadow">
-            <h3 className="text-sm font-medium text-muted-foreground">Total Expenses</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">Total Trip Expenses</h3>
             <p className="text-2xl font-bold">{displayCurrencySymbol}{totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div className="p-4 bg-muted rounded-lg shadow">
             <h3 className="text-sm font-medium text-muted-foreground">Your Spending (Paid by You)</h3>
             <p className="text-2xl font-bold">{displayCurrencySymbol}{yourSpending.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
-          </div>
-          <div className="p-4 bg-muted rounded-lg shadow">
-            <h3 className="text-sm font-medium text-muted-foreground">Your Net Balance</h3>
-            <p className={`text-2xl font-bold ${netBalance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-              {displayCurrencySymbol}{netBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-            </p>
-            <p className="text-xs text-muted-foreground">AI settlement needed for details</p>
           </div>
         </CardContent>
       </Card>
@@ -320,75 +305,31 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
   onExpenseAction: () => void;
 }) {
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
-  const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
-  const [settlementPlan, setSettlementPlan] = useState<SuggestDebtSettlementOutput['settlementPlan'] | null>(null);
-  const [isSuggestingSettlement, setIsSuggestingSettlement] = useState(false);
-  const { toast } = useToast();
   const displayCurrencySymbol = tripCurrency === 'INR' ? '₹' : tripCurrency;
 
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
   
-  const getParticipantNames = (participantUIDs: string[]) => {
-    if (!members || !participantUIDs) return 'N/A';
-    return participantUIDs.map(uid => getMemberName(uid)).join(', ') || 'All involved';
-  };
-
-  const handleSuggestSettlement = async () => {
-    if (!expenses || expenses.length === 0 || !members || members.length === 0) {
-      toast({
-        title: "No Data for Settlement",
-        description: "Please add some expenses and members before suggesting a settlement.",
-        variant: "destructive",
-      });
-      return;
+  const getParticipantShareDetails = (expense: Expense) => {
+    if (!members || !expense.participants || expense.participants.length === 0) return 'N/A';
+    const payerName = getMemberName(expense.paidBy);
+    const participantNames = expense.participants.map(uid => getMemberName(uid)).join(', ');
+    const shareAmount = (expense.amount / expense.participants.length).toFixed(2);
+    if (expense.participants.length === 1 && expense.participants[0] === expense.paidBy) {
+      return `Paid by ${payerName} for themself.`;
     }
-    setIsSuggestingSettlement(true);
-    try {
-      const genkitInput: SuggestDebtSettlementInput = {
-        expenses: expenses.map(e => ({
-          payer: e.paidBy,
-          amount: e.amount,
-          currency: e.currency,
-          participants: e.participants,
-        })),
-        members: members.map(m => m.id),
-      };
-      const result = await suggestDebtSettlement(genkitInput);
-      setSettlementPlan(result.settlementPlan);
-      setIsSettlementModalOpen(true);
-    } catch (error: any) {
-      console.error("Error suggesting debt settlement:", error);
-      toast({
-        title: "AI Settlement Error",
-        description: error.message || "Could not generate settlement suggestions.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSuggestingSettlement(false);
-    }
+    return `Participants: ${participantNames}. Each owes ${displayCurrencySymbol}${shareAmount} to ${payerName}.`;
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-2xl font-semibold">Expenses</h2>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          <Button
-            onClick={() => setIsAddExpenseModalOpen(true)}
-            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-          >
-            <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleSuggestSettlement}
-            disabled={isSuggestingSettlement || !expenses || expenses.length === 0}
-            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-          >
-            {isSuggestingSettlement ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            Suggest Settlement (AI)
-          </Button>
-        </div>
+        <Button
+          onClick={() => setIsAddExpenseModalOpen(true)}
+          className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+        >
+          <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
+        </Button>
       </div>
 
       {isAddExpenseModalOpen && members && (
@@ -403,29 +344,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             setIsAddExpenseModalOpen(false);
           }}
         />
-      )}
-
-      {settlementPlan && (
-        <AlertDialog open={isSettlementModalOpen} onOpenChange={setIsSettlementModalOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Suggested Debt Settlement</AlertDialogTitle>
-              <AlertDialogDescription>
-                Here&apos;s an optimized plan to settle debts based on the expenses recorded:
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="my-4 space-y-2 text-sm max-h-60 overflow-y-auto">
-              {settlementPlan.length > 0 ? settlementPlan.map((item, index) => (
-                <div key={index} className="p-3 bg-muted rounded-md">
-                  <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: <span className="font-semibold">{item.currency === 'INR' ? '₹' : item.currency} {item.amount.toFixed(2)}</span>
-                </div>
-              )) : <p className="text-muted-foreground">No settlements needed or AI could not determine a plan with the current data.</p>}
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogAction onClick={() => setIsSettlementModalOpen(false)}>Got it!</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       )}
 
       {expenses && expenses.length > 0 ? (
@@ -444,11 +362,9 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                         <span>{exp.currency === 'INR' ? '₹' : exp.currency} {exp.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                         <Badge variant="outline" className="ml-2 text-xs">{exp.category}</Badge>
                       </div>
-                      {exp.participants && exp.participants.length > 0 && (
-                        <p className="text-xs text-muted-foreground/80 mt-1">
-                          Participants: {getParticipantNames(exp.participants)}
-                        </p>
-                      )}
+                      <p className="text-xs text-muted-foreground/80 mt-1">
+                        {getParticipantShareDetails(exp)}
+                      </p>
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
                   </div>
@@ -683,7 +599,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time && // Only show 'Until' if it's a multi-day event without specific start/end times on those days
+                             !event.time && 
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -717,7 +633,7 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
   const [isAddingItem, setIsAddingItem] = useState<boolean>(false);
   const { toast } = useToast();
 
-  const packingItems = initialPackingItems || []; // Ensure packingItems is always an array
+  const packingItems = initialPackingItems || [];
   const totalItems: number = packingItems.length;
   const packedItemsCount: number = packingItems.filter(item => item.packed).length;
   const progress: number = totalItems > 0 ? (packedItemsCount / totalItems) * 100 : 0;
@@ -737,13 +653,13 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
         name: newItemName.trim(),
         packed: false,
         addedBy: currentUser.uid,
-        createdAt: FirestoreTimestamp.now(), // Use FirestoreTimestamp for server-side timestamping
+        createdAt: FirestoreTimestamp.now(),
       };
       await addDoc(collection(db, 'trips', tripId, 'packingItems'), itemToAdd);
 
       toast({ title: "Item Added", description: `"${itemToAdd.name}" has been added to your packing list.` });
       setNewItemName('');
-      onPackingAction(); // Re-fetches packing items
+      onPackingAction();
     } catch (error: any) {
       console.error("Error adding packing item:", error);
       toast({
@@ -765,9 +681,9 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
     try {
       await updateDoc(itemRef, {
         packed: !item.packed,
-        lastCheckedBy: currentUser.uid, // Record who last toggled
+        lastCheckedBy: currentUser.uid,
       });
-      onPackingAction(); // Re-fetches packing items
+      onPackingAction();
     } catch (error: any) {
       console.error("Error updating packing item:", error);
       toast({
@@ -820,7 +736,6 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
-                  {/* Optional: Add a delete button here if needed, with appropriate permissions */}
                 </li>
               ))}
             </ul>
@@ -830,6 +745,136 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
                 <p className="text-muted-foreground font-semibold">Your packing list is empty.</p>
                 <p className="text-sm text-muted-foreground mt-1">Add items you need for the trip!</p>
             </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SettlementTab({ trip, expenses, members }: { 
+  trip: Trip; 
+  expenses: Expense[] | undefined; 
+  members: Member[] | undefined;
+}) {
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
+
+  const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
+
+  const memberBalances = useMemo(() => {
+    if (!expenses || !members || members.length === 0) return [];
+
+    const balances: Record<string, number> = {};
+    members.forEach(member => balances[member.id] = 0);
+
+    expenses.forEach(expense => {
+      balances[expense.paidBy] += expense.amount;
+      const sharePerParticipant = expense.amount / (expense.participants.length || 1);
+      expense.participants.forEach(participantId => {
+        balances[participantId] -= sharePerParticipant;
+      });
+    });
+    return members.map(member => ({
+      memberId: member.id,
+      memberName: getMemberName(member.id),
+      balance: balances[member.id]
+    })).sort((a,b) => b.balance - a.balance); // Sort by balance descending (creditors first)
+  }, [expenses, members, getMemberName]);
+
+
+  const settlementTransactions = useMemo(() => {
+    if (!memberBalances || memberBalances.length === 0) return [];
+
+    const transactions: Array<{from: string, to: string, amount: number}> = [];
+    const balancesCopy = JSON.parse(JSON.stringify(memberBalances.map(mb => ({ id: mb.memberId, name: mb.memberName, balance: mb.balance }))));
+    
+    // Separate debtors and creditors
+    let debtors = balancesCopy.filter((m: any) => m.balance < 0).sort((a: any, b: any) => a.balance - b.balance); // Most negative first
+    let creditors = balancesCopy.filter((m: any) => m.balance > 0).sort((a: any, b: any) => b.balance - a.balance); // Most positive first
+
+    let debtorIndex = 0;
+    let creditorIndex = 0;
+
+    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+      const debtor = debtors[debtorIndex];
+      const creditor = creditors[creditorIndex];
+      const amountToTransfer = Math.min(-debtor.balance, creditor.balance);
+
+      if (amountToTransfer > 0.005) { // Threshold to avoid tiny transactions due to float precision
+        transactions.push({
+          from: debtor.name,
+          to: creditor.name,
+          amount: amountToTransfer
+        });
+
+        debtor.balance += amountToTransfer;
+        creditor.balance -= amountToTransfer;
+      }
+
+      if (Math.abs(debtor.balance) < 0.005) {
+        debtorIndex++;
+      }
+      if (Math.abs(creditor.balance) < 0.005) {
+        creditorIndex++;
+      }
+    }
+    return transactions;
+  }, [memberBalances]);
+
+
+  if (!expenses || expenses.length === 0 || !members || members.length === 0) {
+    return (
+       <Card className="text-center py-10 shadow-sm border-dashed">
+          <CardContent>
+              <Scale className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <p className="text-muted-foreground font-semibold">No expenses or members yet.</p>
+              <p className="text-sm text-muted-foreground mt-1">Add expenses and members to see settlement details.</p>
+          </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="shadow-md">
+        <CardHeader>
+          <CardTitle>Member Balances</CardTitle>
+          <CardDescription>Summary of who owes or is owed money.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {memberBalances.length > 0 ? (
+            <ul className="divide-y">
+              {memberBalances.map(({ memberId, memberName, balance }) => (
+                <li key={memberId} className="py-3 flex justify-between items-center">
+                  <span className="font-medium">{memberName}</span>
+                  <span className={`font-semibold ${balance < 0 ? 'text-destructive' : 'text-green-600'}`}>
+                    {balance < 0 ? `Owes ${displayCurrencySymbol}${Math.abs(balance).toFixed(2)}` : (balance > 0 ? `Is Owed ${displayCurrencySymbol}${balance.toFixed(2)}` : `Settled ${displayCurrencySymbol}0.00`)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">No balance information available.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-md">
+        <CardHeader>
+          <CardTitle>Settlement Plan</CardTitle>
+          <CardDescription>Suggested transactions to settle all debts efficiently.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {settlementTransactions.length > 0 ? (
+            <ul className="space-y-2">
+              {settlementTransactions.map((txn, index) => (
+                <li key={index} className="p-3 bg-muted rounded-md text-sm">
+                  <strong>{txn.from}</strong> should pay <strong>{txn.to}</strong>: <span className="font-semibold">{displayCurrencySymbol}{txn.amount.toFixed(2)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">All debts are settled, or no transactions needed!</p>
           )}
         </CardContent>
       </Card>
@@ -851,7 +896,7 @@ export default function TripDetailPage() {
       setCnFunction(() => utils.cn);
     }).catch(err => {
         console.error("Failed to load cn function from utils", err);
-        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' ')); // Fallback cn
+        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' '));
     });
   }, []);
 
@@ -886,7 +931,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
+      staleTime: 15 * 60 * 1000,
     })),
   });
 
@@ -901,18 +946,15 @@ export default function TripDetailPage() {
     queryKeysToInvalidate.forEach(key => {
       queryClient.invalidateQueries({ queryKey: [key, tripId] });
     });
-    // If tripDetails itself changed (e.g., members list), refetch trip and then member details
     if (queryKeysToInvalidate.includes('tripDetails')) {
       refetchTripDetails().then(() => {
-        // After trip details are refetched, member UIDs might have changed,
-        // so invalidate member details to refetch them based on the new UIDs.
-        queryClient.invalidateQueries({queryKey: ['memberDetails']}); // Invalidate all member details queries
+        queryClient.invalidateQueries({queryKey: ['memberDetails']});
       });
     }
   }, [queryClient, tripId, refetchTripDetails]);
 
 
-  if (isLoadingTrip || isLoadingMembers) { // Consider all initial essential data loading
+  if (isLoadingTrip || isLoadingMembers) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -939,15 +981,12 @@ export default function TripDetailPage() {
       </Card>
     );
   }
-  // Optional: Add more specific error handling for sub-collections if needed,
-  // though typically if the main trip loads, sub-collections should also load if permissions are right.
 
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
 
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
-      {/* Header Section with Image and Trip Info */}
       <div className="relative h-56 md:h-80 rounded-xl overflow-hidden shadow-lg group">
         <Image
           src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`}
@@ -957,7 +996,7 @@ export default function TripDetailPage() {
           className="brightness-75 group-hover:brightness-90 transition-all duration-300"
           data-ai-hint={trip.dataAiHint || 'travel landscape'}
           sizes="(max-width: 768px) 100vw, 1200px"
-          priority // Load hero image faster
+          priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"></div>
         <div className="absolute bottom-0 left-0 p-4 md:p-8 text-white">
@@ -969,16 +1008,18 @@ export default function TripDetailPage() {
             <CalendarDays className="mr-2 h-3 w-3 md:h-4 md:w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </div>
-        {/* Optional: Add Edit Trip Button for owner here */}
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
+        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
           <TabsTrigger value="overview" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <BarChart3 className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Overview</span>
           </TabsTrigger>
           <TabsTrigger value="expenses" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <DollarSign className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Expenses</span>
+          </TabsTrigger>
+           <TabsTrigger value="settlement" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
+            <Scale className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Settlement</span>
           </TabsTrigger>
           <TabsTrigger value="members" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <Users className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Members</span>
@@ -989,8 +1030,6 @@ export default function TripDetailPage() {
           <TabsTrigger value="packing" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <ListChecks className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Packing</span>
           </TabsTrigger>
-          {/* Optional: Add Settings Tab for trip owner later */}
-          {/* <TabsTrigger value="settings" className="flex-1 py-2.5 text-sm flex items-center justify-center gap-2"><Settings className="h-4 w-4"/> Settings</TabsTrigger> */}
         </TabsList>
 
         <TabsContent value="overview">
@@ -1006,8 +1045,13 @@ export default function TripDetailPage() {
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
-              onExpenseAction={() => handleGenericAction(['tripExpenses'])} // Invalidate only expenses
+              onExpenseAction={() => handleGenericAction(['tripExpenses'])}
             />}
+        </TabsContent>
+         <TabsContent value="settlement">
+          {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+           errorExpenses || errorMembers ? <p className="text-destructive">Error loading settlement data: {(errorExpenses || errorMembers)?.message}</p> :
+           trip && members && expenses ? <SettlementTab trip={trip} expenses={expenses} members={members} /> : <p>Loading data or insufficient data for settlement.</p>}
         </TabsContent>
         <TabsContent value="members">
           {isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
@@ -1024,12 +1068,7 @@ export default function TripDetailPage() {
            errorPacking ? <p className="text-destructive">Error loading packing list: {errorPacking.message}</p> :
            <PackingListTab tripId={tripId} packingItems={packingItems} onPackingAction={() => handleGenericAction(['tripPackingList'])} currentUser={currentUser} />}
         </TabsContent>
-        {/* <TabsContent value="settings">
-          {trip && currentUser?.uid === trip.ownerId ? <TripSettingsTab trip={trip} /> : <p>Access denied or not owner.</p>}
-        </TabsContent> */}
       </Tabs>
     </div>
   );
 }
-
-    
