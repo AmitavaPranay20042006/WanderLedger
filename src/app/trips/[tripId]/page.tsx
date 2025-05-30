@@ -196,11 +196,12 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
       };
       const categoryItem = categoryData.find(cd => cd.category === item.category);
       if (categoryItem) {
-          categoryItem.fill = `var(--chart-${index % 5 + 1})`;
+          categoryItem.fill = `hsl(var(--chart-${index % 5 + 1}))`; // Ensure fill is assigned
       }
     });
     return config;
   }, [categoryData]);
+
 
   const memberSpendingData = useMemo(() => {
     if (!expenses || expenses.length === 0 || !members || members.length === 0) return [];
@@ -297,15 +298,19 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
   );
 }
 
-function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction }: {
-  tripId: string;
+function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, currentUser }: {
+  trip: Trip;
   expenses: Expense[] | undefined;
   members: Member[] | undefined;
   tripCurrency: string;
   onExpenseAction: () => void;
+  currentUser: FirebaseUser | null;
 }) {
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const { toast } = useToast();
   const displayCurrencySymbol = tripCurrency === 'INR' ? '₹' : tripCurrency;
+  const isTripOwner = currentUser?.uid === trip.ownerId;
 
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
   
@@ -318,6 +323,21 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
       return `Paid by ${payerName} for themself.`;
     }
     return `Participants: ${participantNames}. Each owes ${displayCurrencySymbol}${shareAmount} to ${payerName}.`;
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!expenseToDelete || !isTripOwner) return;
+    try {
+      const expenseRef = doc(db, 'trips', trip.id, 'expenses', expenseToDelete.id);
+      await deleteDoc(expenseRef);
+      toast({ title: "Expense Deleted", description: `"${expenseToDelete.description}" has been removed.` });
+      onExpenseAction(); // Refreshes the expense list
+    } catch (error: any) {
+      console.error("Error deleting expense:", error);
+      toast({ title: "Error Deleting Expense", description: error.message || "Could not delete expense.", variant: "destructive" });
+    } finally {
+      setExpenseToDelete(null);
+    }
   };
 
   return (
@@ -336,7 +356,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
         <AddExpenseModal
           isOpen={isAddExpenseModalOpen}
           onClose={() => setIsAddExpenseModalOpen(false)}
-          tripId={tripId}
+          tripId={trip.id}
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
@@ -344,6 +364,28 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
             setIsAddExpenseModalOpen(false);
           }}
         />
+      )}
+
+      {expenseToDelete && (
+        <AlertDialog open={!!expenseToDelete} onOpenChange={(open) => !open && setExpenseToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Expense: {expenseToDelete.description}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this expense? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setExpenseToDelete(null)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteExpense}
+                className={buttonVariants({ variant: "destructive" })}
+              >
+                Delete Expense
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
 
       {expenses && expenses.length > 0 ? (
@@ -367,6 +409,19 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       </p>
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
+                    {isTripOwner && (
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive group-hover:opacity-100 sm:opacity-0 transition-opacity flex-shrink-0"
+                          onClick={() => setExpenseToDelete(exp)}
+                          aria-label={`Delete expense: ${exp.description}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                    )}
                   </div>
                 </li>
               ))}
@@ -866,10 +921,10 @@ function SettlementTab({ trip, expenses, members }: {
         </CardHeader>
         <CardContent>
           {settlementTransactions.length > 0 ? (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {settlementTransactions.map((txn, index) => (
-                <li key={index} className="p-3 bg-muted rounded-md text-sm">
-                  <strong>{txn.from}</strong> should pay <strong>{txn.to}</strong>: <span className="font-semibold">{displayCurrencySymbol}{txn.amount.toFixed(2)}</span>
+                <li key={index} className="p-4 bg-muted rounded-lg shadow-sm text-sm">
+                  <span className="font-semibold text-primary">{txn.from}</span> should pay <span className="font-semibold text-primary">{txn.to}</span>: <strong className="text-lg">{displayCurrencySymbol}{txn.amount.toFixed(2)}</strong>
                 </li>
               ))}
             </ul>
@@ -1011,7 +1066,7 @@ export default function TripDetailPage() {
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
+        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
           <TabsTrigger value="overview" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
             <BarChart3 className="h-4 w-4" /> <span className="hidden xs:hidden sm:inline">Overview</span>
           </TabsTrigger>
@@ -1038,14 +1093,15 @@ export default function TripDetailPage() {
            trip ? <TripOverviewTab trip={trip} expenses={expenses} members={members} currentUser={currentUser} /> : <p>No trip data.</p>}
         </TabsContent>
         <TabsContent value="expenses">
-          {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+          {isLoadingExpenses || isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorExpenses ? <p className="text-destructive">Error loading expenses: {errorExpenses.message}</p> :
            trip && <ExpensesTab
-              tripId={tripId}
+              trip={trip}
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
               onExpenseAction={() => handleGenericAction(['tripExpenses'])}
+              currentUser={currentUser}
             />}
         </TabsContent>
          <TabsContent value="settlement">
@@ -1072,3 +1128,6 @@ export default function TripDetailPage() {
     </div>
   );
 }
+
+
+    
