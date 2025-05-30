@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, PlusCircle, BarChart3, Sparkles, FileText, CalendarDays, Settings, Loader2, AlertTriangle, Edit, Trash2, CheckSquare, Square, IndianRupee, UserPlus, MapPinIcon, UserMinus, PieChartIcon } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, query, orderBy, Timestamp as FirestoreTimestamp, updateDoc, addDoc, where, writeBatch, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useAuth } from '@/contexts/auth-context';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import AddExpenseModal from '@/components/trips/add-expense-modal';
 import InviteMemberModal from '@/components/trips/invite-member-modal';
 import AddEventModal from '@/components/trips/add-event-modal';
@@ -33,6 +33,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Progress } from '@/components/ui/progress';
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend } from '@/components/ui/chart';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend as RechartsLegend, ResponsiveContainer } from 'recharts';
+import { type ChartConfig } from '@/components/ui/chart';
 
 
 // --- Data Types ---
@@ -107,7 +110,6 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
 
   if (tripSnap.exists()) {
     const data = tripSnap.data();
-    // Process Firestore Timestamps to JS Dates for all relevant fields
     const processedData = { ...data } as { [key: string]: any };
     Object.keys(processedData).forEach(key => {
         if (processedData[key] instanceof FirestoreTimestamp) {
@@ -118,7 +120,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
     return {
       id: tripSnap.id,
       ...processedData,
-      baseCurrency: data.baseCurrency || 'INR', // Default to INR if not set
+      baseCurrency: data.baseCurrency || 'INR',
     } as Trip;
   }
   return null;
@@ -137,7 +139,6 @@ async function fetchSubCollection<T>(tripId: string, subCollectionName: string, 
   return snapshot.docs.map(docSnap => {
     const data = docSnap.data();
     const processedData = { ...data } as { [key: string]: any };
-    // Convert all Firestore Timestamps to JS Dates
     Object.keys(processedData).forEach(key => {
       if (processedData[key] instanceof FirestoreTimestamp) {
         processedData[key] = (processedData[key] as FirestoreTimestamp).toDate();
@@ -160,19 +161,64 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
       email: data.email || '',
     } as Member;
   }
-  // Fallback if user document doesn't exist (should ideally not happen if AuthProvider creates user docs)
   return { id: userId, displayName: 'Unknown User (' + userId.substring(0,6) + '...)', photoURL: `https://placehold.co/40x40.png?text=U`, email: '' };
 }
 
 
 // --- Tab Components ---
 
-function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses: Expense[] | undefined; currentUser: FirebaseUser | null}) {
+function TripOverviewTab({ trip, expenses, members, currentUser }: { 
+  trip: Trip; 
+  expenses: Expense[] | undefined; 
+  members: Member[] | undefined; 
+  currentUser: FirebaseUser | null 
+}) {
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
   const yourSpending = expenses?.filter(exp => exp.paidBy === currentUser?.uid).reduce((sum, exp) => sum + exp.amount, 0) || 0;
-  // Placeholder for net balance - actual calculation is complex and needs settlement logic
   const netBalance = 0; // This will be updated by AI settlement feature
+
+  const getMemberName = (uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...";
+
+  const categoryData = useMemo(() => {
+    if (!expenses || expenses.length === 0) return [];
+    const grouped = expenses.reduce((acc, curr) => {
+      acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
+      return acc;
+    }, {} as Record<string, number>);
+    return Object.entries(grouped).map(([category, amount]) => ({ category, amount, fill: '' })).sort((a,b) => b.amount - a.amount);
+  }, [expenses]);
+
+  const categoryChartConfig = useMemo(() => {
+    const config: ChartConfig = {};
+    categoryData.forEach((item, index) => {
+      config[item.category] = {
+        label: item.category,
+        color: `hsl(var(--chart-${index % 5 + 1}))`,
+      };
+      item.fill = `var(--chart-${index % 5 + 1})`;
+    });
+    return config;
+  }, [categoryData]);
+
+
+  const memberSpendingData = useMemo(() => {
+    if (!expenses || expenses.length === 0 || !members || members.length === 0) return [];
+    const spending = expenses.reduce((acc, curr) => {
+      acc[curr.paidBy] = (acc[curr.paidBy] || 0) + curr.amount;
+      return acc;
+    }, {} as Record<string, number>);
+    return Object.entries(spending).map(([memberId, amount]) => ({
+      name: getMemberName(memberId),
+      amount,
+      fill: 'var(--chart-1)' // Use a consistent color or cycle if desired
+    })).sort((a,b) => b.amount - a.amount);
+  }, [expenses, members, getMemberName]);
+
+  const memberSpendingChartConfig = {
+    amount: { label: "Amount Spent", color: "hsl(var(--chart-1))" },
+  } satisfies ChartConfig;
+
 
   return (
     <div className="space-y-6">
@@ -198,6 +244,55 @@ function TripOverviewTab({ trip, expenses, currentUser }: { trip: Trip; expenses
           </div>
         </CardContent>
       </Card>
+
+      {expenses && expenses.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="shadow-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><PieChartIcon className="h-5 w-5"/> Expenses by Category</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {categoryData.length > 0 ? (
+                <ChartContainer config={categoryChartConfig} className="min-h-[250px] w-full aspect-square">
+                  <PieChart>
+                    <ChartTooltip content={<ChartTooltipContent nameKey="category" hideLabel />} />
+                    <Pie data={categoryData} dataKey="amount" nameKey="category" labelLine={false} label={({ percent, name }) => `${name}: ${(percent * 100).toFixed(0)}%`}>
+                      {categoryData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <RechartsLegend content={({payload}) => <ChartLegendContent payload={payload} />} />
+                  </PieChart>
+                </ChartContainer>
+              ) : (
+                <p className="text-muted-foreground text-center py-10">No category data to display.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5"/> Spending per Member</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {memberSpendingData.length > 0 ? (
+                <ChartContainer config={memberSpendingChartConfig} className="min-h-[250px] w-full">
+                  <BarChart data={memberSpendingData} layout="vertical" margin={{ left: 20, right: 20}}>
+                    <CartesianGrid horizontal={false} />
+                    <XAxis type="number" tickFormatter={(value) => `${displayCurrencySymbol}${value}`} />
+                    <YAxis dataKey="name" type="category" tickLine={false} axisLine={false} tickMargin={8} width={100} />
+                    <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" hideLabel />} />
+                    <Bar dataKey="amount" radius={4} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                <p className="text-muted-foreground text-center py-10">No member spending data to display.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Description</CardTitle>
@@ -296,7 +391,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
           members={members}
           tripCurrency={tripCurrency}
           onExpenseAdded={() => {
-            onExpenseAction(); // This will refetch expenses
+            onExpenseAction();
             setIsAddExpenseModalOpen(false);
           }}
         />
@@ -311,7 +406,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                 Here&apos;s an optimized plan to settle debts based on the expenses recorded:
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="my-4 space-y-2 text-sm">
+            <div className="my-4 space-y-2 text-sm max-h-60 overflow-y-auto">
               {settlementPlan.length > 0 ? settlementPlan.map((item, index) => (
                 <div key={index} className="p-3 bg-muted rounded-md">
                   <strong>{getMemberName(item.from)}</strong> owes <strong>{getMemberName(item.to)}</strong>: <span className="font-semibold">{item.currency === 'INR' ? '₹' : item.currency} {item.amount.toFixed(2)}</span>
@@ -348,11 +443,6 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
                       )}
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
-                    {/* Placeholder for edit/delete expense actions - visible on hover */}
-                    {/* <div className="flex-shrink-0 space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-7 w-7"><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                    </div> */}
                   </div>
                 </li>
               ))}
@@ -375,7 +465,7 @@ function ExpensesTab({ tripId, expenses, members, tripCurrency, onExpenseAction 
 function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
   trip: Trip;
   members: Member[] | undefined;
-  onMemberAction: () => void; // Callback to refetch trip details after action
+  onMemberAction: () => void;
 }) {
   const { user: currentUser } = useAuth();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -402,7 +492,7 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
         members: arrayRemove(memberToRemove.id)
       });
       toast({ title: "Member Removed", description: `${memberToRemove.displayName || 'Member'} has been removed from the trip.` });
-      onMemberAction(); // Refetch trip details which will update member list
+      onMemberAction();
     } catch (error: any) {
       console.error("Error removing member:", error);
       toast({ title: "Error Removing Member", description: error.message || "Could not remove member.", variant: "destructive" });
@@ -431,9 +521,9 @@ function MembersTab({ trip, members: fetchedMembers, onMemberAction }: {
           isOpen={isInviteModalOpen}
           onClose={() => setIsInviteModalOpen(false)}
           tripId={trip.id}
-          currentMembers={trip.members} // Pass current member UIDs
+          currentMembers={trip.members}
           onMemberInvited={() => {
-            onMemberAction(); // Refetch trip details
+            onMemberAction();
             setIsInviteModalOpen(false);
           }}
         />
@@ -523,18 +613,15 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
 
 
   useEffect(() => {
-    // Dynamically import cn from lib/utils
     import('@/lib/utils').then(utils => {
-      setCnFunction(() => utils.cn); // Store the cn function itself
+      setCnFunction(() => utils.cn);
     }).catch(error => {
         console.error("Failed to load cn utility:", error);
-        // Fallback or error handling if cn can't be loaded
         setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' '));
     });
   }, []);
 
 
-  // Group events by date string
   const groupedEvents = itineraryEvents?.reduce((acc, event) => {
     const dateStr = event.date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     if (!acc[dateStr]) {
@@ -562,7 +649,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
           onClose={() => setIsAddEventModalOpen(false)}
           tripId={tripId}
           onEventAdded={() => {
-            onEventAction(); // Refetch itinerary
+            onEventAction();
             setIsAddEventModalOpen(false);
           }}
         />
@@ -581,14 +668,14 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                      <div className="flex items-start gap-3">
                         {event.time && <p className="text-sm font-medium text-primary w-16 pt-0.5">{event.time}</p>}
                         <div className={cnFunction("flex-grow", event.time ? "border-l pl-3" : "")}>
-                            <div className="font-semibold flex items-center"> {/* Changed to div */}
+                            <div className="font-semibold flex items-center">
                                 <span>{event.title}</span>
                                 <Badge variant="secondary" className="ml-2 text-xs">{event.type}</Badge>
                             </div>
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
-                            {event.endDate && event.endDate.getTime() > event.date.getTime() && // Check if endDate is strictly after startDate
-                             !event.time && // Only show if it's an all-day or multi-day event without specific start time
+                            {event.endDate && event.endDate.getTime() > event.date.getTime() &&
+                             !event.time &&
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -672,7 +759,7 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
         packed: !item.packed,
         lastCheckedBy: currentUser.uid,
       });
-      onPackingAction(); // Refetch to ensure UI consistency
+      onPackingAction(); 
     } catch (error: any) {
       console.error("Error updating packing item:", error);
       toast({
@@ -725,7 +812,6 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
                     />
                     <span className={`${item.packed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{item.name}</span>
                   </label>
-                  {/* Future: Add delete button here, visible to item creator or trip owner */}
                 </li>
               ))}
             </ul>
@@ -756,7 +842,7 @@ export default function TripDetailPage() {
       setCnFunction(() => utils.cn);
     }).catch(err => {
         console.error("Failed to load cn function from utils", err);
-        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' ')); // Fallback
+        setCnFunction(() => (...inputs: any[]) => inputs.filter(Boolean).join(' '));
     });
   }, []);
 
@@ -767,21 +853,18 @@ export default function TripDetailPage() {
     enabled: !!tripId,
   });
 
-  // Fetch expenses, ordered by date descending
   const { data: expenses, isLoading: isLoadingExpenses, error: errorExpenses, refetch: refetchExpenses } = useQuery<Expense[], Error>({
     queryKey: ['tripExpenses', tripId],
     queryFn: () => fetchSubCollection<Expense>(tripId, 'expenses', 'id', 'date', 'desc'),
     enabled: !!tripId,
   });
 
-  // Fetch itinerary events, ordered by date ascending
   const { data: itineraryEvents, isLoading: isLoadingItinerary, error: errorItinerary, refetch: refetchItinerary } = useQuery<ItineraryEvent[], Error>({
     queryKey: ['tripItinerary', tripId],
     queryFn: () => fetchSubCollection<ItineraryEvent>(tripId, 'itineraryEvents', 'id', 'date', 'asc'),
     enabled: !!tripId,
   });
 
-  // Fetch packing list items, ordered by creation date ascending
   const { data: packingItems, isLoading: isLoadingPacking, error: errorPacking, refetch: refetchPackingList } = useQuery<PackingListItem[], Error>({
     queryKey: ['tripPackingList', tripId],
     queryFn: () => fetchSubCollection<PackingListItem>(tripId, 'packingItems', 'id', 'createdAt', 'asc'),
@@ -794,27 +877,23 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000, // Cache member details for 15 mins
+      staleTime: 15 * 60 * 1000,
     })),
   });
 
   const members = memberQueries.every(q => q.isSuccess)
-                ? memberQueries.map(q => q.data).filter(Boolean) as Member[] // Filter out nulls if any query failed to return data
+                ? memberQueries.map(q => q.data).filter(Boolean) as Member[]
                 : undefined;
   const isLoadingMembers = memberQueries.some(q => q.isLoading);
   const errorMembers = memberQueries.find(q => q.error)?.error;
 
 
-  // Centralized function to invalidate queries after actions
   const handleGenericAction = useCallback((queryKeysToInvalidate: string[]) => {
     queryKeysToInvalidate.forEach(key => {
       queryClient.invalidateQueries({ queryKey: [key, tripId] });
     });
-    // If tripDetails itself was changed (e.g., members array), refetch it to update memberUIDs for useQueries
     if (queryKeysToInvalidate.includes('tripDetails')) {
       refetchTripDetails().then(() => {
-        // After trip details are refetched, invalidate all individual member detail queries
-        // because the list of UIDs might have changed.
         queryClient.invalidateQueries({queryKey: ['memberDetails']});
       });
     }
@@ -854,7 +933,6 @@ export default function TripDetailPage() {
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
-      {/* Trip Header */}
       <div className="relative h-56 md:h-80 rounded-xl overflow-hidden shadow-lg group">
         <Image
           src={trip.coverPhotoURL || `https://placehold.co/1200x400.png?text=${encodeURIComponent(trip.name)}`}
@@ -864,7 +942,7 @@ export default function TripDetailPage() {
           className="brightness-75 group-hover:brightness-90 transition-all duration-300"
           data-ai-hint={trip.dataAiHint || 'travel landscape'}
           sizes="(max-width: 768px) 100vw, 1200px"
-          priority // Prioritize loading of the main trip image
+          priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"></div>
         <div className="absolute bottom-0 left-0 p-4 md:p-8 text-white">
@@ -876,15 +954,8 @@ export default function TripDetailPage() {
             <CalendarDays className="mr-2 h-3 w-3 md:h-4 md:w-4 flex-shrink-0" /> {trip.startDate.toLocaleDateString()} - {trip.endDate.toLocaleDateString()}
           </p>
         </div>
-        {/* Placeholder for Edit Trip Button for Owner */}
-        {/* {currentUser?.uid === trip.ownerId && (
-          <Button variant="outline" size="icon" className="absolute top-4 right-4 bg-background/70 hover:bg-background/90">
-            <Settings className="h-5 w-5" />
-          </Button>
-        )} */}
       </div>
 
-      {/* Tabs Navigation */}
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-1 mb-6 shadow-sm bg-muted p-1 rounded-lg h-auto">
           <TabsTrigger value="overview" className="flex-1 py-2 sm:py-2.5 text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2">
@@ -904,11 +975,10 @@ export default function TripDetailPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Tab Contents */}
         <TabsContent value="overview">
-          {isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+          {isLoadingTrip || isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorTrip ? <p className="text-destructive">Error loading overview: {errorTrip.message}</p> :
-           trip ? <TripOverviewTab trip={trip} expenses={expenses} currentUser={currentUser} /> : <p>No trip data.</p>}
+           trip ? <TripOverviewTab trip={trip} expenses={expenses} members={members} currentUser={currentUser} /> : <p>No trip data.</p>}
         </TabsContent>
         <TabsContent value="expenses">
           {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
@@ -941,3 +1011,4 @@ export default function TripDetailPage() {
   );
 }
 
+    
