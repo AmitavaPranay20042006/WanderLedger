@@ -106,8 +106,8 @@ interface MemberFinancials {
   memberName: string;
   totalPaid: number;
   totalShare: number;
-  netBalance: number; // Balance after considering expenses and recorded payments
-  initialNetBalance: number; // Balance based only on expenses
+  netBalance: number; 
+  initialNetBalance: number; 
 }
 
 export interface RecordedPayment {
@@ -148,7 +148,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
     return {
       id: tripSnap.id,
       ...processedData,
-      baseCurrency: data.baseCurrency || 'INR', // Ensure a default if not present
+      baseCurrency: data.baseCurrency || 'INR', 
     } as Trip;
   }
   return null;
@@ -417,7 +417,7 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
                        {exp.notes && <p className="text-xs text-muted-foreground/80 mt-1">Notes: {exp.notes}</p>}
                     </div>
                      {isTripOwner && (
-                      <AlertDialog open={!!expenseToDelete && expenseToDelete.id === exp.id} onOpenChange={(open) => { if(!open) setExpenseToDelete(null); }}>
+                       <AlertDialog open={expenseToDelete?.id === exp.id} onOpenChange={(open) => { if(!open) setExpenseToDelete(null); }}>
                         <AlertDialogTrigger asChild>
                           <Button
                             variant="ghost"
@@ -841,7 +841,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
   currentUser: FirebaseUser | null;
   onAction: () => void;
 }) {
-  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 relative -top-px" /> : trip.baseCurrency;
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 relative -top-px mr-0.5" /> : trip.baseCurrency;
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
   const { toast } = useToast();
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
@@ -874,7 +874,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
     members.forEach(member => {
       const memberData = financials[member.id];
       memberData.initialNet = memberData.paid - memberData.share;
-      memberData.adjustedNet = memberData.initialNet; // Start with initial net
+      memberData.adjustedNet = memberData.initialNet; 
     });
 
     if (recordedPayments) {
@@ -971,19 +971,20 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
       fromUserId: paymentToRecordDetails.fromUserId,
       toUserId: paymentToRecordDetails.toUserId,
       amount: paymentToRecordDetails.amount,
-      currency: currentTripBaseCurrency, // Use validated client-side currency
+      currency: currentTripBaseCurrency, 
       dateRecorded: serverTimestamp(),
       recordedBy: currentUser.uid,
       notes: recordPaymentNotes.trim() || '',
     };
-
+    
+    console.log(`Attempting to record payment for tripId: ${trip.id}`);
     console.log('Recording payment. Payload:', JSON.stringify(paymentData, null, 2));
     console.log('Using trip.baseCurrency from client trip object:', currentTripBaseCurrency);
 
 
     try {
       await addDoc(collection(db, 'trips', trip.id, 'recordedPayments'), paymentData);
-      toast({ title: "Payment Recorded", description: `Payment of ${displayCurrencySymbol}${paymentToRecordDetails.amount.toFixed(2)} from ${paymentToRecordDetails.from} to ${paymentToRecordDetails.to} has been recorded.` });
+      toast({ title: "Payment Recorded", description: `Payment from ${paymentToRecordDetails.from} to ${paymentToRecordDetails.to} has been recorded.` });
       onAction(); 
       setPaymentToRecordDetails(null);
       setRecordPaymentNotes('');
@@ -1033,7 +1034,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
                     <div className={`flex justify-between font-semibold pt-1 mt-1 border-t border-dashed ${netBalance < -0.005 ? 'text-destructive' : netBalance > 0.005 ? 'text-green-600 dark:text-green-500' : 'text-muted-foreground'}`}>
                       <span>Net Balance:</span>
                       <span>
-                        {netBalance < -0.005 ? `Owes ${displayCurrencySymbol}${Math.abs(netBalance).toFixed(2)}` : (netBalance > 0.005 ? `Is Owed ${displayCurrencySymbol}${netBalance.toFixed(2)}` : `Settled ${displayCurrencySymbol}0.00`)}
+                        {netBalance < -0.005 ? <>Owes {displayCurrencySymbol}{Math.abs(netBalance).toFixed(2)}</> : (netBalance > 0.005 ? <>Is Owed {displayCurrencySymbol}{netBalance.toFixed(2)}</> : <>Settled {displayCurrencySymbol}0.00</>)}
                       </span>
                     </div>
                   </div>
@@ -1091,8 +1092,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
             <AlertDialogHeader>
               <AlertDialogTitle>Record Payment</AlertDialogTitle>
               <AlertDialogDescription>
-                You are about to record a payment of 
-                <strong className="mx-1">{displayCurrencySymbol}{paymentToRecordDetails.amount.toFixed(2)}</strong> 
+                You are about to record a payment of <strong className="mx-1">{displayCurrencySymbol}{paymentToRecordDetails.amount.toFixed(2)}</strong> 
                 from <strong className="mx-1">{paymentToRecordDetails.from}</strong> 
                 to <strong className="mx-1">{paymentToRecordDetails.to}</strong>.
               </AlertDialogDescription>
