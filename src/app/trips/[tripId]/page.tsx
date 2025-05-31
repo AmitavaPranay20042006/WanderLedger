@@ -947,20 +947,25 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
   }, [memberFinancials]);
 
   const handleRecordPayment = async () => {
-    if (!paymentToRecordDetails || !currentUser) {
-      toast({ title: "Error", description: "Missing details to record payment.", variant: "destructive" });
-      return;
+    if (!paymentToRecordDetails || !currentUser || !trip) { // Added !trip check for completeness
+        toast({ title: "Error", description: "Missing details or trip data to record payment.", variant: "destructive" });
+        return;
     }
+
+    console.log(`--- PREPARE TO RECORD PAYMENT ---`);
+    console.log(`Client-side Trip ID: ${trip.id}`);
+    console.log(`Client-side Trip Name: ${trip.name}`);
+    console.log(`Client-side trip.baseCurrency VALUE: "${trip.baseCurrency}" (Type: ${typeof trip.baseCurrency})`);
 
     const currentTripBaseCurrency = typeof trip.baseCurrency === 'string' && trip.baseCurrency.length === 3 ? trip.baseCurrency : 'INVALID_CURRENCY_ON_CLIENT';
 
     if (currentTripBaseCurrency === 'INVALID_CURRENCY_ON_CLIENT') {
-        console.error("Critical Error: trip.baseCurrency is invalid on the client. Value:", trip.baseCurrency);
+        console.error(`Critical Error: Client-side trip.baseCurrency for trip ID ${trip.id} is invalid. Value: "${trip.baseCurrency}". Cannot record payment.`);
         toast({
             title: "Trip Configuration Error",
-            description: "The base currency for this trip is not set up correctly. Cannot record payment. Please contact trip owner.",
+            description: `The base currency ("${trip.baseCurrency || 'Not set'}") for trip "${trip.name}" (ID: ${trip.id}) is not set up correctly on the client. Cannot record payment. Please ensure the trip has a valid base currency in Firestore.`,
             variant: "destructive",
-            duration: 7000,
+            duration: 10000, // Longer duration for important user message
         });
         return;
     }
@@ -977,10 +982,8 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
       notes: recordPaymentNotes.trim() || '',
     };
     
-    console.log(`Attempting to record payment for tripId: ${trip.id}`);
+    console.log(`Attempting to record payment for tripId: ${trip.id}. Client believes base currency is: ${currentTripBaseCurrency}`);
     console.log('Recording payment. Payload:', JSON.stringify(paymentData, null, 2));
-    console.log('Using trip.baseCurrency from client trip object:', currentTripBaseCurrency);
-
 
     try {
       await addDoc(collection(db, 'trips', trip.id, 'recordedPayments'), paymentData);
