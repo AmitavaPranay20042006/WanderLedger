@@ -947,8 +947,14 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
   }, [memberFinancials]);
 
   const handleRecordPayment = async () => {
-    if (!paymentToRecordDetails || !currentUser || !trip) { // Added !trip check for completeness
-        toast({ title: "Error", description: "Missing details or trip data to record payment.", variant: "destructive" });
+    if (!currentUser || !trip) {
+        toast({ title: "Error", description: "User or trip data is not available. Cannot record payment.", variant: "destructive" });
+        console.error("handleRecordPayment: currentUser or trip is null/undefined.", {currentUser, tripId: trip?.id});
+        return;
+    }
+    if (!paymentToRecordDetails) {
+        toast({ title: "Error", description: "Payment details are missing.", variant: "destructive" });
+        console.error("handleRecordPayment: paymentToRecordDetails is null.");
         return;
     }
 
@@ -956,33 +962,36 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
     console.log(`Client-side Trip ID: ${trip.id}`);
     console.log(`Client-side Trip Name: ${trip.name}`);
     console.log(`Client-side trip.baseCurrency VALUE: "${trip.baseCurrency}" (Type: ${typeof trip.baseCurrency})`);
+    console.log(`Current User UID for recordedBy: ${currentUser.uid}`);
 
-    const currentTripBaseCurrency = typeof trip.baseCurrency === 'string' && trip.baseCurrency.length === 3 ? trip.baseCurrency : 'INVALID_CURRENCY_ON_CLIENT';
 
-    if (currentTripBaseCurrency === 'INVALID_CURRENCY_ON_CLIENT') {
+    const currentTripBaseCurrencyFromState = typeof trip.baseCurrency === 'string' && trip.baseCurrency.length === 3 ? trip.baseCurrency : 'INVALID_CURRENCY_ON_CLIENT';
+
+    if (currentTripBaseCurrencyFromState === 'INVALID_CURRENCY_ON_CLIENT') {
         console.error(`Critical Error: Client-side trip.baseCurrency for trip ID ${trip.id} is invalid. Value: "${trip.baseCurrency}". Cannot record payment.`);
         toast({
             title: "Trip Configuration Error",
             description: `The base currency ("${trip.baseCurrency || 'Not set'}") for trip "${trip.name}" (ID: ${trip.id}) is not set up correctly on the client. Cannot record payment. Please ensure the trip has a valid base currency in Firestore.`,
             variant: "destructive",
-            duration: 10000, // Longer duration for important user message
+            duration: 10000,
         });
         return;
     }
 
     setIsRecordingPayment(true);
     
+    // Use trip.baseCurrency directly from the prop for consistency in the payload
     const paymentData = {
       fromUserId: paymentToRecordDetails.fromUserId,
       toUserId: paymentToRecordDetails.toUserId,
       amount: paymentToRecordDetails.amount,
-      currency: currentTripBaseCurrency, 
+      currency: trip.baseCurrency, // Directly use from trip prop
       dateRecorded: serverTimestamp(),
       recordedBy: currentUser.uid,
       notes: recordPaymentNotes.trim() || '',
     };
     
-    console.log(`Attempting to record payment for tripId: ${trip.id}. Client believes base currency is: ${currentTripBaseCurrency}`);
+    console.log(`Attempting to record payment for tripId: ${trip.id}. Client believes base currency is: ${trip.baseCurrency}`);
     console.log('Recording payment. Payload:', JSON.stringify(paymentData, null, 2));
 
     try {
