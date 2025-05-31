@@ -148,7 +148,7 @@ async function fetchTripDetails(tripId: string): Promise<Trip | null> {
     return {
       id: tripSnap.id,
       ...processedData,
-      baseCurrency: data.baseCurrency || 'INR',
+      baseCurrency: data.baseCurrency || 'INR', // Ensure a default if not present
     } as Trip;
   }
   return null;
@@ -880,10 +880,10 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
     if (recordedPayments) {
       recordedPayments.forEach(payment => {
         if (financials[payment.fromUserId]) {
-          financials[payment.fromUserId].adjustedNet += payment.amount; // Payer's balance improves (owes less / is owed more)
+          financials[payment.fromUserId].adjustedNet += payment.amount; 
         }
         if (financials[payment.toUserId]) {
-          financials[payment.toUserId].adjustedNet -= payment.amount; // Receiver's balance worsens (is owed less / owes more)
+          financials[payment.toUserId].adjustedNet -= payment.amount; 
         }
       });
     }
@@ -895,10 +895,10 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
         memberName: getMemberName(member.id),
         totalPaid: memberData.paid,
         totalShare: memberData.share,
-        initialNetBalance: memberData.initialNet, // For reference if needed
-        netBalance: memberData.adjustedNet, // This is the final balance after recorded payments
+        initialNetBalance: memberData.initialNet,
+        netBalance: memberData.adjustedNet, 
       };
-    }).sort((a, b) => b.netBalance - a.netBalance); // Creditors first (those owed most)
+    }).sort((a, b) => b.netBalance - a.netBalance);
   }, [expenses, members, recordedPayments, getMemberName]);
 
 
@@ -906,14 +906,14 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
     if (!memberFinancials || memberFinancials.length === 0) return [];
 
     const transactions: SettlementTransaction[] = [];
-    const balancesCopy = memberFinancials.map(mf => ({ 
+    const balancesCopy = JSON.parse(JSON.stringify(memberFinancials.map(mf => ({ 
         id: mf.memberId, 
         name: mf.memberName, 
-        balance: mf.netBalance // Use the final netBalance after recorded payments
-    }));
+        balance: mf.netBalance 
+    }))));
 
-    let debtors = balancesCopy.filter((m) => m.balance < -0.005).sort((a, b) => a.balance - b.balance); // Sort by who owes most (most negative)
-    let creditors = balancesCopy.filter((m) => m.balance > 0.005).sort((a, b) => b.balance - a.balance); // Sort by who is owed most
+    let debtors = balancesCopy.filter((m: any) => m.balance < -0.005).sort((a: any, b: any) => a.balance - b.balance);
+    let creditors = balancesCopy.filter((m: any) => m.balance > 0.005).sort((a: any, b: any) => b.balance - a.balance);
 
     let debtorIndex = 0;
     let creditorIndex = 0;
@@ -923,7 +923,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
       const creditor = creditors[creditorIndex];
       const amountToTransfer = Math.min(-debtor.balance, creditor.balance);
 
-      if (amountToTransfer > 0.005) { // Threshold to avoid tiny transactions
+      if (amountToTransfer > 0.005) { 
         transactions.push({
           fromUserId: debtor.id,
           from: debtor.name,
@@ -936,10 +936,10 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
         creditor.balance -= amountToTransfer;
       }
 
-      if (Math.abs(debtor.balance) < 0.005) { // Debtor is settled or very close
+      if (Math.abs(debtor.balance) < 0.005) {
         debtorIndex++;
       }
-      if (Math.abs(creditor.balance) < 0.005) { // Creditor is settled or very close
+      if (Math.abs(creditor.balance) < 0.005) {
         creditorIndex++;
       }
     }
@@ -947,29 +947,49 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
   }, [memberFinancials]);
 
   const handleRecordPayment = async () => {
-    if (!paymentToRecordDetails || !currentUser || !trip.baseCurrency) {
+    if (!paymentToRecordDetails || !currentUser) {
       toast({ title: "Error", description: "Missing details to record payment.", variant: "destructive" });
       return;
     }
+
+    const currentTripBaseCurrency = typeof trip.baseCurrency === 'string' && trip.baseCurrency.length === 3 ? trip.baseCurrency : 'INVALID_CURRENCY_ON_CLIENT';
+
+    if (currentTripBaseCurrency === 'INVALID_CURRENCY_ON_CLIENT') {
+        console.error("Critical Error: trip.baseCurrency is invalid on the client. Value:", trip.baseCurrency);
+        toast({
+            title: "Trip Configuration Error",
+            description: "The base currency for this trip is not set up correctly. Cannot record payment. Please contact trip owner.",
+            variant: "destructive",
+            duration: 7000,
+        });
+        return;
+    }
+
     setIsRecordingPayment(true);
+    
+    const paymentData = {
+      fromUserId: paymentToRecordDetails.fromUserId,
+      toUserId: paymentToRecordDetails.toUserId,
+      amount: paymentToRecordDetails.amount,
+      currency: currentTripBaseCurrency, // Use validated client-side currency
+      dateRecorded: serverTimestamp(),
+      recordedBy: currentUser.uid,
+      notes: recordPaymentNotes.trim() || '',
+    };
+
+    console.log('Recording payment. Payload:', JSON.stringify(paymentData, null, 2));
+    console.log('Using trip.baseCurrency from client trip object:', currentTripBaseCurrency);
+
+
     try {
-      const paymentData = {
-        fromUserId: paymentToRecordDetails.fromUserId,
-        toUserId: paymentToRecordDetails.toUserId,
-        amount: paymentToRecordDetails.amount,
-        currency: trip.baseCurrency,
-        dateRecorded: serverTimestamp(),
-        recordedBy: currentUser.uid,
-        notes: recordPaymentNotes.trim() || '',
-      };
       await addDoc(collection(db, 'trips', trip.id, 'recordedPayments'), paymentData);
       toast({ title: "Payment Recorded", description: `Payment of ${displayCurrencySymbol}${paymentToRecordDetails.amount.toFixed(2)} from ${paymentToRecordDetails.from} to ${paymentToRecordDetails.to} has been recorded.` });
-      onAction(); // This should refetch recordedPayments
+      onAction(); 
       setPaymentToRecordDetails(null);
       setRecordPaymentNotes('');
     } catch (error: any) {
       console.error("Error recording payment:", error);
-      toast({ title: "Error Recording Payment", description: error.message || "Could not record payment.", variant: "destructive" });
+      toast({ title: "Error Recording Payment", description: error.message || "Could not record payment. Check console for details.", variant: "destructive" });
     } finally {
       setIsRecordingPayment(false);
     }
@@ -1010,7 +1030,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
                       <span className="text-muted-foreground">Total Share:</span>
                       <span>{displayCurrencySymbol}{totalShare.toFixed(2)}</span>
                     </div>
-                    <div className={`flex justify-between font-semibold pt-1 mt-1 border-t border-dashed ${netBalance < -0.005 ? 'text-destructive' : netBalance > 0.005 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                    <div className={`flex justify-between font-semibold pt-1 mt-1 border-t border-dashed ${netBalance < -0.005 ? 'text-destructive' : netBalance > 0.005 ? 'text-green-600 dark:text-green-500' : 'text-muted-foreground'}`}>
                       <span>Net Balance:</span>
                       <span>
                         {netBalance < -0.005 ? `Owes ${displayCurrencySymbol}${Math.abs(netBalance).toFixed(2)}` : (netBalance > 0.005 ? `Is Owed ${displayCurrencySymbol}${netBalance.toFixed(2)}` : `Settled ${displayCurrencySymbol}0.00`)}
@@ -1029,7 +1049,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
       <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Settlement Plan (Outstanding Debts)</CardTitle>
-          <CardDescription>Suggested transactions to settle remaining debts. Click the checkmark to record a payment.</CardDescription>
+          <CardDescription>Suggested transactions to settle remaining debts. Click the checkmark to record a payment having been made.</CardDescription>
         </CardHeader>
         <CardContent>
           {settlementTransactions.length > 0 ? (
@@ -1133,7 +1153,7 @@ export default function TripDetailPage() {
   const { data: recordedPayments, isLoading: isLoadingRecordedPayments, error: errorRecordedPayments, refetch: refetchRecordedPayments } = useQuery<RecordedPayment[], Error>({
     queryKey: ['recordedPayments', tripId],
     queryFn: () => fetchSubCollection<RecordedPayment>(tripId, 'recordedPayments', 'id', 'dateRecorded', 'desc'),
-    enabled: !!tripId && !!currentUser, // Only fetch if tripId and user are available
+    enabled: !!tripId && !!currentUser, 
   });
 
   const { data: itineraryEvents, isLoading: isLoadingItinerary, error: errorItinerary, refetch: refetchItinerary } = useQuery<ItineraryEvent[], Error>({
@@ -1154,7 +1174,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000, // Stale for 15 mins
+      staleTime: 15 * 60 * 1000, 
     })),
   });
 
@@ -1212,7 +1232,7 @@ export default function TripDetailPage() {
     );
   }
 
-  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1" /> : trip.baseCurrency;
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 mr-1 relative -top-px" /> : trip.baseCurrency;
 
 
   return (
@@ -1275,7 +1295,7 @@ export default function TripDetailPage() {
               expenses={expenses}
               members={members}
               tripCurrency={trip.baseCurrency || 'INR'}
-              onExpenseAction={() => handleGenericAction(['tripExpenses', 'recordedPayments'])} // Also refetch payments
+              onExpenseAction={() => handleGenericAction(['tripExpenses', 'recordedPayments'])} 
               currentUser={currentUser}
             />}
         </TabsContent>
