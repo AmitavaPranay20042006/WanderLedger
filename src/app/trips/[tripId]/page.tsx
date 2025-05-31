@@ -100,6 +100,14 @@ export interface Member {
   email?: string | null;
 }
 
+interface MemberFinancials {
+  memberId: string;
+  memberName: string;
+  totalPaid: number;
+  totalShare: number;
+  netBalance: number;
+}
+
 
 // --- Data Fetching Functions ---
 async function fetchTripDetails(tripId: string): Promise<Trip | null> {
@@ -166,11 +174,11 @@ async function fetchMemberDetails(userId: string): Promise<Member | null> {
 
 // --- Tab Components ---
 
-function TripOverviewTab({ trip, expenses, members, currentUser }: { 
-  trip: Trip; 
-  expenses: Expense[] | undefined; 
-  members: Member[] | undefined; 
-  currentUser: FirebaseUser | null 
+function TripOverviewTab({ trip, expenses, members, currentUser }: {
+  trip: Trip;
+  expenses: Expense[] | undefined;
+  members: Member[] | undefined;
+  currentUser: FirebaseUser | null
 }) {
   const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
   const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
@@ -196,7 +204,7 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
       };
       const categoryItem = categoryData.find(cd => cd.category === item.category);
       if (categoryItem) {
-          categoryItem.fill = `hsl(var(--chart-${index % 5 + 1}))`; 
+          categoryItem.fill = `hsl(var(--chart-${index % 5 + 1}))`;
       }
     });
     return config;
@@ -212,7 +220,7 @@ function TripOverviewTab({ trip, expenses, members, currentUser }: {
     return Object.entries(spending).map(([memberId, amount]) => ({
       name: getMemberName(memberId),
       amount,
-      fill: 'hsl(var(--chart-1))' 
+      fill: 'hsl(var(--chart-1))'
     })).sort((a,b) => b.amount - a.amount);
   }, [expenses, members, getMemberName]);
 
@@ -313,7 +321,7 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
   const isTripOwner = currentUser?.uid === trip.ownerId;
 
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
-  
+
   const getParticipantShareDetails = (expense: Expense) => {
     if (!members || !expense.participants || expense.participants.length === 0) return 'N/A';
     const payerName = getMemberName(expense.paidBy);
@@ -331,7 +339,7 @@ function ExpensesTab({ trip, expenses, members, tripCurrency, onExpenseAction, c
       const expenseRef = doc(db, 'trips', trip.id, 'expenses', expenseToDelete.id);
       await deleteDoc(expenseRef);
       toast({ title: "Expense Deleted", description: `"${expenseToDelete.description}" has been removed.` });
-      onExpenseAction(); 
+      onExpenseAction();
     } catch (error: any) {
       console.error("Error deleting expense:", error);
       toast({ title: "Error Deleting Expense", description: error.message || "Could not delete expense.", variant: "destructive" });
@@ -651,7 +659,7 @@ function ItineraryTab({ tripId, itineraryEvents, onEventAction }: {
                             {event.location && <p className="text-xs text-muted-foreground mt-1 flex items-center"><MapPinIcon className="h-3 w-3 mr-1.5"/> {event.location}</p>}
                             {event.notes && <p className="text-sm text-muted-foreground/90 mt-1 whitespace-pre-wrap">{event.notes}</p>}
                             {event.endDate && event.endDate.getTime() > event.date.getTime() &&
-                             !event.time && 
+                             !event.time &&
                                 <p className="text-xs text-muted-foreground/70 mt-0.5">Until: {event.endDate.toLocaleDateString()}</p>
                             }
                         </div>
@@ -804,44 +812,57 @@ function PackingListTab({ tripId, packingItems: initialPackingItems, onPackingAc
   );
 }
 
-function SettlementTab({ trip, expenses, members }: { 
-  trip: Trip; 
-  expenses: Expense[] | undefined; 
+function SettlementTab({ trip, expenses, members }: {
+  trip: Trip;
+  expenses: Expense[] | undefined;
   members: Member[] | undefined;
 }) {
-  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? '₹' : trip.baseCurrency;
-
+  const displayCurrencySymbol = trip.baseCurrency === 'INR' ? <IndianRupee className="inline-block h-5 w-5 relative -top-px" /> : trip.baseCurrency;
   const getMemberName = useCallback((uid: string) => members?.find(m => m.id === uid)?.displayName || uid.substring(0,6)+"...", [members]);
 
-  const memberBalances = useMemo(() => {
+  const memberFinancials = useMemo((): MemberFinancials[] => {
     if (!expenses || !members || members.length === 0) return [];
 
-    const balances: Record<string, number> = {};
-    members.forEach(member => balances[member.id] = 0);
+    const financials: Record<string, { paid: number, share: number }> = {};
+    members.forEach(member => {
+      financials[member.id] = { paid: 0, share: 0 };
+    });
 
     expenses.forEach(expense => {
-      balances[expense.paidBy] += expense.amount;
+      if (financials[expense.paidBy]) {
+        financials[expense.paidBy].paid += expense.amount;
+      }
       const sharePerParticipant = expense.amount / (expense.participants.length || 1);
       expense.participants.forEach(participantId => {
-        balances[participantId] -= sharePerParticipant;
+        if (financials[participantId]) {
+          financials[participantId].share += sharePerParticipant;
+        }
       });
     });
-    return members.map(member => ({
-      memberId: member.id,
-      memberName: getMemberName(member.id),
-      balance: balances[member.id]
-    })).sort((a,b) => b.balance - a.balance); 
+
+    return members.map(member => {
+      const memberData = financials[member.id];
+      return {
+        memberId: member.id,
+        memberName: getMemberName(member.id),
+        totalPaid: memberData.paid,
+        totalShare: memberData.share,
+        netBalance: memberData.paid - memberData.share,
+      };
+    }).sort((a, b) => b.netBalance - a.netBalance);
   }, [expenses, members, getMemberName]);
 
 
   const settlementTransactions = useMemo(() => {
-    if (!memberBalances || memberBalances.length === 0) return [];
+    if (!memberFinancials || memberFinancials.length === 0) return [];
 
     const transactions: Array<{from: string, to: string, amount: number}> = [];
-    const balancesCopy = JSON.parse(JSON.stringify(memberBalances.map(mb => ({ id: mb.memberId, name: mb.memberName, balance: mb.balance }))));
-    
-    let debtors = balancesCopy.filter((m: any) => m.balance < 0).sort((a: any, b: any) => a.balance - b.balance); 
-    let creditors = balancesCopy.filter((m: any) => m.balance > 0).sort((a: any, b: any) => b.balance - a.balance); 
+    const balancesCopy = JSON.parse(JSON.stringify(
+        memberFinancials.map(mf => ({ id: mf.memberId, name: mf.memberName, balance: mf.netBalance }))
+    ));
+
+    let debtors = balancesCopy.filter((m: any) => m.balance < 0).sort((a: any, b: any) => a.balance - b.balance);
+    let creditors = balancesCopy.filter((m: any) => m.balance > 0).sort((a: any, b: any) => b.balance - a.balance);
 
     let debtorIndex = 0;
     let creditorIndex = 0;
@@ -851,7 +872,7 @@ function SettlementTab({ trip, expenses, members }: {
       const creditor = creditors[creditorIndex];
       const amountToTransfer = Math.min(-debtor.balance, creditor.balance);
 
-      if (amountToTransfer > 0.005) { 
+      if (amountToTransfer > 0.005) {
         transactions.push({
           from: debtor.name,
           to: creditor.name,
@@ -870,7 +891,7 @@ function SettlementTab({ trip, expenses, members }: {
       }
     }
     return transactions;
-  }, [memberBalances]);
+  }, [memberFinancials]);
 
 
   if (!expenses || expenses.length === 0 || !members || members.length === 0) {
@@ -889,23 +910,36 @@ function SettlementTab({ trip, expenses, members }: {
     <div className="space-y-6">
       <Card className="shadow-md">
         <CardHeader>
-          <CardTitle>Member Balances</CardTitle>
-          <CardDescription>Summary of who owes or is owed money.</CardDescription>
+          <CardTitle>Member Financial Summary</CardTitle>
+          <CardDescription>Breakdown of each member's contributions and shares.</CardDescription>
         </CardHeader>
         <CardContent>
-          {memberBalances.length > 0 ? (
+          {memberFinancials.length > 0 ? (
             <ul className="divide-y">
-              {memberBalances.map(({ memberId, memberName, balance }) => (
-                <li key={memberId} className="py-3 flex justify-between items-center">
-                  <span className="font-medium">{memberName}</span>
-                  <span className={`font-semibold ${balance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-                    {balance < 0 ? `Owes ${displayCurrencySymbol}${Math.abs(balance).toFixed(2)}` : (balance > 0 ? `Is Owed ${displayCurrencySymbol}${balance.toFixed(2)}` : `Settled ${displayCurrencySymbol}0.00`)}
-                  </span>
+              {memberFinancials.map(({ memberId, memberName, totalPaid, totalShare, netBalance }) => (
+                <li key={memberId} className="py-4">
+                  <div className="font-semibold text-lg mb-2">{memberName}</div>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total Paid by {memberName}:</span>
+                      <span>{displayCurrencySymbol}{totalPaid.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{memberName}'s Total Share:</span>
+                      <span>{displayCurrencySymbol}{totalShare.toFixed(2)}</span>
+                    </div>
+                    <div className={`flex justify-between font-semibold pt-1 mt-1 border-t border-dashed ${netBalance < 0 ? 'text-destructive' : netBalance > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                      <span>Net Balance:</span>
+                      <span>
+                        {netBalance < 0 ? `Owes ${displayCurrencySymbol}${Math.abs(netBalance).toFixed(2)}` : (netBalance > 0 ? `Is Owed ${displayCurrencySymbol}${netBalance.toFixed(2)}` : `Settled ${displayCurrencySymbol}0.00`)}
+                      </span>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-muted-foreground">No balance information available.</p>
+            <p className="text-muted-foreground">No financial information available.</p>
           )}
         </CardContent>
       </Card>
@@ -922,7 +956,6 @@ function SettlementTab({ trip, expenses, members }: {
                 <li key={index} className="p-4 border rounded-lg shadow-sm bg-background hover:bg-muted/50 transition-colors">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                       {/* Consider adding User icons/avatars here in future if Member object contains photoURL */}
                       <span className="font-semibold text-primary text-sm break-all">{txn.from}</span>
                       <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                       <span className="font-semibold text-primary text-sm break-all">{txn.to}</span>
@@ -933,7 +966,12 @@ function SettlementTab({ trip, expenses, members }: {
               ))}
             </ul>
           ) : (
-            <p className="text-muted-foreground">All debts are settled, or no transactions needed!</p>
+             <p className="text-muted-foreground text-center py-4">
+              {expenses && expenses.length > 0 && members && members.length > 0
+                ? "All debts are settled, or no transactions needed!"
+                : "Add expenses and members to calculate settlement."
+              }
+            </p>
           )}
         </CardContent>
       </Card>
@@ -990,7 +1028,7 @@ export default function TripDetailPage() {
       queryKey: ['memberDetails', uid],
       queryFn: () => fetchMemberDetails(uid),
       enabled: !!uid,
-      staleTime: 15 * 60 * 1000,
+      staleTime: 15 * 60 * 1000, // Stale for 15 mins
     })),
   });
 
@@ -1007,13 +1045,13 @@ export default function TripDetailPage() {
     });
     if (queryKeysToInvalidate.includes('tripDetails')) {
       refetchTripDetails().then(() => {
-        queryClient.invalidateQueries({queryKey: ['memberDetails']});
+        queryClient.invalidateQueries({queryKey: ['memberDetails']}); // Invalidate member details if trip details (members array) changes
       });
     }
   }, [queryClient, tripId, refetchTripDetails]);
 
 
-  if (isLoadingTrip || isLoadingMembers) { 
+  if (isLoadingTrip || isLoadingMembers) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -1109,7 +1147,7 @@ export default function TripDetailPage() {
             />}
         </TabsContent>
          <TabsContent value="settlement">
-          {isLoadingExpenses || isLoadingMembers ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
+          {isLoadingExpenses || isLoadingMembers || isLoadingTrip ? <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /> :
            errorExpenses || errorMembers ? <p className="text-destructive">Error loading settlement data: {(errorExpenses || errorMembers)?.message}</p> :
            trip && members && expenses ? <SettlementTab trip={trip} expenses={expenses} members={members} /> : <p>Loading data or insufficient data for settlement.</p>}
         </TabsContent>
@@ -1132,3 +1170,4 @@ export default function TripDetailPage() {
     </div>
   );
 }
+
