@@ -22,9 +22,11 @@ service cloud.firestore {
       }
 
       function isValidUserUpdatePayload(oldData, newData, request) {
-        // Ensure createdAt is not changed if it exists, or allows it if it's not in newData (client doesn't send it on update)
+        // Ensure createdAt is not changed or is not part of the update
+        let createdAtUnchanged = !('createdAt' in newData) || newData.createdAt == oldData.createdAt;
+
         return newData.uid == oldData.uid &&
-               ( !('createdAt' in newData) || newData.createdAt == oldData.createdAt ) &&
+               createdAtUnchanged &&
                (newData.email == oldData.email || (newData.email is string && newData.email == newData.email.lower())) &&
                (!('displayName' in newData.diff(oldData).affectedKeys()) || newData.displayName is string) &&
                (!('photoURL' in newData.diff(oldData).affectedKeys()) || newData.photoURL is string) &&
@@ -75,7 +77,8 @@ service cloud.firestore {
       }
 
       function isValidTripMembersOnlyUpdatePayload(existingData, incomingData) {
-        return incomingData.members is list && incomingData.members.size() >= 0 && // Allow 0 members if owner is removing others
+        // Allow members list to be empty temporarily if owner is making changes, but owner must remain.
+        return incomingData.members is list &&
                existingData.ownerId in incomingData.members;
       }
 
@@ -95,21 +98,20 @@ service cloud.firestore {
                   resource.data.members is list &&
                   request.auth.uid in resource.data.members;
 
-      allow list: if isAuthenticated(request); // Consider scoping this further later
+      allow list: if isAuthenticated(request); // Usually requires query constraints for security/performance
 
       allow update: if isOwnerOfThisTrip(request, resource) &&
         (
-          ( // Core fields update by owner
-            request.resource.data.diff(resource.data).affectedKeys().hasAny([
-              'name', 'destination', 'startDate', 'endDate', 'description', 'coverPhotoURL', 'dataAiHint', 'baseCurrency'
-            ]) &&
-            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerId', 'createdAt', 'members']) && // ownerId and createdAt cannot be changed
-            isValidTripCoreFieldsUpdatePayload(resource.data, request.resource.data)
-          ) ||
-          ( // Members list update by owner
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
-            isValidTripMembersOnlyUpdatePayload(resource.data, request.resource.data)
-          )
+          // Rule for updating core trip fields
+          request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'name', 'destination', 'startDate', 'endDate', 'description', 'coverPhotoURL', 'dataAiHint', 'baseCurrency'
+          ]) &&
+          isValidTripCoreFieldsUpdatePayload(resource.data, request.resource.data)
+        ) ||
+        (
+          // Rule for updating only the members array
+          request.resource.data.diff(resource.data).hasOnly(['members']) &&
+          isValidTripMembersOnlyUpdatePayload(resource.data, request.resource.data)
         );
 
       allow delete: if isOwnerOfThisTrip(request, resource);
@@ -120,28 +122,26 @@ service cloud.firestore {
                  data.createdAt == request.time &&
                  data.description is string && data.description.size() > 0 && data.description.size() <= 100 &&
                  data.amount is number && data.amount > 0 &&
-                 data.currency is string && data.currency == tripDoc.data.baseCurrency &&
-                 data.category is string && data.category.size() > 0 &&
+                 data.currency is string && data.currency.size() == 3 && data.currency == tripDoc.data.baseCurrency &&
                  data.participants is list && data.participants.size() > 0 &&
-                 data.participants.hasAll(tripDoc.data.members) == false && // Ensure participants are subset of trip members
-                 data.paidBy in data.participants && // Payer must be a participant
-                 data.paidBy in tripDoc.data.members && // Payer must be a trip member
-                 data.participants.hasAll(data.participants.toSet()); // No duplicate participants
+                 data.participants.hasAny(data.paidBy) && // Ensure payer is a participant
+                 data.participants.hasAll(data.participants) && // All participants must be in the members list
+                 data.participants.size() <= tripDoc.data.members.size() &&
+                 data.participants.hasAll(tripDoc.data.members.filter(member => data.participants.hasAny(member))) && // More robust check
+                 (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
         }
 
         function isValidSimplifiedExpenseUpdate(oldData, newData, request, tripDoc) {
-          return request.auth.uid == oldData.paidBy && // Only payer can update their own expense for now
+          return request.auth.uid == oldData.paidBy && // Only payer can update for now
                  newData.paidBy == oldData.paidBy &&
                  newData.createdAt == oldData.createdAt &&
                  newData.description is string && newData.description.size() > 0 && newData.description.size() <= 100 &&
                  newData.amount is number && newData.amount > 0 &&
-                 newData.currency is string && newData.currency == tripDoc.data.baseCurrency &&
-                 newData.category is string && newData.category.size() > 0 &&
+                 newData.currency is string && newData.currency.size() == 3 && newData.currency == tripDoc.data.baseCurrency &&
                  newData.participants is list && newData.participants.size() > 0 &&
-                 newData.participants.hasAll(tripDoc.data.members) == false &&
-                 newData.paidBy in newData.participants &&
-                 newData.paidBy in tripDoc.data.members &&
-                 newData.participants.hasAll(newData.participants.toSet());
+                 newData.participants.hasAny(newData.paidBy) &&
+                 newData.participants.hasAll(tripDoc.data.members.filter(member => newData.participants.hasAny(member))) &&
+                 (!('notes' in newData) || (newData.notes is string && newData.notes.size() <= 500));
         }
 
         allow read, list: if canAccessSubcollection(request, tripId);
@@ -150,7 +150,7 @@ service cloud.firestore {
         allow update: if canAccessSubcollection(request, tripId) &&
                        isValidSimplifiedExpenseUpdate(resource.data, request.resource.data, request, get(/databases/$(database)/documents/trips/$(tripId)));
         allow delete: if canAccessSubcollection(request, tripId) &&
-                       (get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid || resource.data.paidBy == request.auth.uid);
+                       get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
       }
 
       match /itineraryEvents/{eventId} {
@@ -171,7 +171,7 @@ service cloud.firestore {
                        isValidItineraryEventPayload(request.resource.data, request, true, null);
         allow update: if canAccessSubcollection(request, tripId) &&
                        isValidItineraryEventPayload(request.resource.data, request, false, resource.data);
-        allow delete: if canAccessSubcollection(request, tripId); // Consider owner or creator only
+        allow delete: if canAccessSubcollection(request, tripId); // Any member can delete for now
       }
 
       match /packingItems/{itemId} {
@@ -183,23 +183,27 @@ service cloud.firestore {
         }
 
         function isValidPackingItemUpdatePayload(oldData, newData, tripId, request) {
+          let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
           return newData.name is string && newData.name.size() > 0 && newData.name.size() <= 100 &&
                  newData.packed is bool &&
-                 newData.addedBy == oldData.addedBy &&
-                 newData.createdAt == oldData.createdAt &&
-                 ( // Logic for lastCheckedBy: only allow change if user is the one checking, or if not changing it
-                   (!('lastCheckedBy' in newData.diff(oldData).affectedKeys()) || newData.lastCheckedBy == request.auth.uid)
+                 newData.addedBy == oldData.addedBy && // AddedBy cannot change
+                 newData.createdAt == oldData.createdAt && // CreatedAt cannot change
+                 ( // Logic for lastCheckedBy
+                   (newData.packed != oldData.packed && newData.lastCheckedBy == request.auth.uid) || // If packed status changed, lastCheckedBy must be current user
+                   (newData.packed == oldData.packed && !('lastCheckedBy' in newData.diff(oldData).affectedKeys())) || // If packed status same, and lastCheckedBy not changed, allow
+                   (newData.packed == oldData.packed && 'lastCheckedBy' in newData.diff(oldData).affectedKeys() && newData.lastCheckedBy == request.auth.uid) // If packed status same, but lastCheckedBy is changed, it must be current user
                  ) &&
-                 ( // Name can only be changed by creator or trip owner
-                   (!('name' in newData.diff(oldData).affectedKeys()) ||
-                    oldData.addedBy == request.auth.uid ||
-                    get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid)
+                 ( // Logic for name change: only addedBy or trip owner can change name
+                   !('name' in newData.diff(oldData).affectedKeys()) || // If name is not changed, allow
+                   oldData.addedBy == request.auth.uid || // Or if current user is the one who added item
+                   tripDoc.data.ownerId == request.auth.uid // Or if current user is the trip owner
                  );
         }
 
         function userCanDeletePackingItem(request, tripId, resource) {
-          return resource.data.addedBy == request.auth.uid ||
-                 get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+          let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
+          return resource.data.addedBy == request.auth.uid || // User who added it
+                 tripDoc.data.ownerId == request.auth.uid;     // Or trip owner
         }
 
         allow read, list: if canAccessSubcollection(request, tripId);
@@ -212,16 +216,28 @@ service cloud.firestore {
       }
 
       match /recordedPayments/{paymentId} {
-        // --- DIAGNOSTIC: EXTREMELY SIMPLIFIED CREATE RULE ---
-        allow create: if isAuthenticated(request) &&
-                       get(/databases/$(database)/documents/trips/$(tripId)).data.members is list &&
-                       request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members &&
-                       request.resource.data.recordedBy == request.auth.uid &&
-                       request.resource.data.dateRecorded == request.time;
-        // --- END DIAGNOSTIC RULE ---
-
         allow read, list: if canAccessSubcollection(request, tripId);
-        allow update, delete: if false; // Keep these restricted for now
+        allow create:
+          if isAuthenticated(request) &&
+             get(/databases/$(database)/documents/trips/$(tripId)).exists() &&
+             'members' in get(/databases/$(database)/documents/trips/$(tripId)).data &&
+             get(/databases/$(database)/documents/trips/$(tripId)).data.members is list &&
+             request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members &&
+             // Check baseCurrency existence and type
+             'baseCurrency' in get(/databases/$(database)/documents/trips/$(tripId)).data &&
+             get(/databases/$(database)/documents/trips/$(tripId)).data.baseCurrency is string &&
+             // Basic check on incoming currency for now
+             request.resource.data.currency is string && request.resource.data.currency.size() == 3 &&
+             // Restore other checks
+             request.resource.data.recordedBy == request.auth.uid &&
+             request.resource.data.dateRecorded == request.time &&
+             request.resource.data.fromUserId in get(/databases/$(database)/documents/trips/$(tripId)).data.members &&
+             request.resource.data.toUserId in get(/databases/$(database)/documents/trips/$(tripId)).data.members &&
+             request.resource.data.fromUserId != request.resource.data.toUserId &&
+             request.resource.data.amount is number && request.resource.data.amount > 0 &&
+             (!('notes' in request.resource.data) || request.resource.data.notes == null || request.resource.data.notes == '' || (request.resource.data.notes is string && request.resource.data.notes.size() <= 250));
+
+        allow update, delete: if false; // Payments are immutable once created
       }
 
     } // /trips/{tripId}
