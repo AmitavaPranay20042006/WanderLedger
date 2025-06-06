@@ -986,7 +986,7 @@ function SettlementTab({ trip, expenses, members, recordedPayments, currentUser,
       toUserId: paymentToRecordDetails.toUserId,
       amount: paymentToRecordDetails.amount,
       currency: trip.baseCurrency, // Directly use from trip prop
-      dateRecorded: serverTimestamp(),
+      // dateRecorded: serverTimestamp(),
       recordedBy: currentUser.uid,
       notes: recordPaymentNotes.trim() || '',
     };
