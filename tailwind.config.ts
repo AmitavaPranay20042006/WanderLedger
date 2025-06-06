@@ -9,6 +9,16 @@ export default {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
+    container: { // Added container centering
+      center: true,
+      padding: {
+        DEFAULT: '1rem',
+        sm: '2rem',
+        lg: '4rem',
+        xl: '5rem',
+        '2xl': '6rem',
+      },
+    },
     screens: {
       xs: '475px', 
       sm: '640px',
@@ -76,35 +86,48 @@ export default {
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
+  			sm: 'calc(var(--radius) - 4px)',
+        xl: 'calc(var(--radius) + 4px)', // Added for larger rounding
+        '2xl': 'calc(var(--radius) + 8px)',
   		},
   		keyframes: {
   			'accordion-down': {
-  				from: {
-  					height: '0'
-  				},
-  				to: {
-  					height: 'var(--radix-accordion-content-height)'
-  				}
+  				from: { height: '0' },
+  				to: { height: 'var(--radix-accordion-content-height)' }
   			},
   			'accordion-up': {
-  				from: {
-  					height: 'var(--radix-accordion-content-height)'
-  				},
-  				to: {
-  					height: '0'
-  				}
+  				from: { height: 'var(--radix-accordion-content-height)' },
+  				to: { height: '0' }
   			},
         'fade-in-up': {
-          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '0%': { opacity: '0', transform: 'translateY(24px)' }, // Increased Y transform
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        'subtle-pulse': { // Added subtle pulse
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.9', transform: 'scale(1.02)' },
+        },
+        'gradient-flow-fast': { // Faster gradient flow for hero title
+          '0%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+          '100%': { backgroundPosition: '0% 50%' },
+        }
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out',
-        'fade-in-up': 'fade-in-up 0.5s ease-out forwards',
-  		}
+        'fade-in-up': 'fade-in-up 0.7s ease-out forwards', // Slightly longer duration
+        'subtle-pulse': 'subtle-pulse 2s infinite ease-in-out',
+        'gradient-flow-fast': 'gradient-flow-fast 3s linear infinite',
+  		},
+      backgroundSize: { // For gradient animation
+        '300%': '300% 300%',
+      },
+      boxShadow: { // Added some more pronounced shadows
+        'glow-primary': '0 0 20px hsl(var(--primary)/0.3)',
+        'glow-accent': '0 0 20px hsl(var(--accent)/0.3)',
+        'card-hover': '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+      }
   	}
   },
   plugins: [require("tailwindcss-animate")],
