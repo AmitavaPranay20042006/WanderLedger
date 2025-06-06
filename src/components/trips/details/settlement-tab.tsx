@@ -140,7 +140,7 @@ export default function SettlementTab({ trip, expenses, members, recordedPayment
       toast({ title: "Error", description: "Payment details are missing.", variant: "destructive" });
       return;
     }
-    const clientSideBaseCurrency = trip.baseCurrency || 'INR'; // Default if undefined, though should be set
+    const clientSideBaseCurrency = trip.baseCurrency || 'INR'; 
     if (!clientSideBaseCurrency || clientSideBaseCurrency.length !== 3) {
         console.error(`Critical Error: Client-side trip.baseCurrency for trip ID ${trip.id} is invalid. Value: "${trip.baseCurrency}". Cannot record payment.`);
         toast({
@@ -152,6 +152,15 @@ export default function SettlementTab({ trip, expenses, members, recordedPayment
         return;
     }
 
+    // --- DETAILED LOGGING ---
+    console.log(`[SettlementTab] --- PREPARE TO RECORD PAYMENT ---`);
+    console.log(`[SettlementTab] Client-side Trip ID: ${trip.id}`);
+    console.log(`[SettlementTab] Client-side Trip Name: ${trip.name}`);
+    console.log(`[SettlementTab] Client-side trip.baseCurrency VALUE: "${trip.baseCurrency}" (Type: ${typeof trip.baseCurrency})`);
+    console.log(`[SettlementTab] Current User UID for recordedBy: ${currentUser.uid}`);
+    console.log(`[SettlementTab] PaymentToRecordDetails: ${JSON.stringify(paymentToRecordDetails, null, 2)}`);
+    // --- END DETAILED LOGGING ---
+
     setIsRecordingPayment(true);
     const paymentData = {
       fromUserId: paymentToRecordDetails.fromUserId,
@@ -162,6 +171,10 @@ export default function SettlementTab({ trip, expenses, members, recordedPayment
       recordedBy: currentUser.uid,
       notes: recordPaymentNotes.trim() || '',
     };
+    
+    console.log(`[SettlementTab] Attempting to record payment for tripId: ${trip.id}. Client believes base currency is: ${clientSideBaseCurrency}`);
+    console.log('[SettlementTab] Recording payment. Payload:', JSON.stringify(paymentData, null, 2));
+
 
     try {
       await addDoc(collection(db, 'trips', trip.id, 'recordedPayments'), paymentData);
@@ -170,7 +183,7 @@ export default function SettlementTab({ trip, expenses, members, recordedPayment
       setPaymentToRecordDetails(null);
       setRecordPaymentNotes('');
     } catch (error: any) {
-      console.error("Error recording payment:", error);
+      console.error("[SettlementTab] Error recording payment:", error);
       toast({ title: "Error Recording Payment", description: error.message || "Could not record payment. Check console for details.", variant: "destructive" });
     } finally {
       setIsRecordingPayment(false);
@@ -299,3 +312,4 @@ export default function SettlementTab({ trip, expenses, members, recordedPayment
     </div>
   );
 }
+
