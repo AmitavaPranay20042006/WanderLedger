@@ -5,82 +5,83 @@
 
 @layer base {
   :root {
-    --background: 220 20% 98%; /* Lighter, slightly cool off-white */
-    --foreground: 220 15% 20%; /* Dark cool gray for text */
+    --background: 220 30% 99%; /* Slightly warmer, brighter off-white */
+    --foreground: 220 15% 15%; /* Softer, very dark cool gray for text */
     --card: 0 0% 100%;
-    --card-foreground: 220 15% 20%;
+    --card-foreground: 220 15% 15%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 15% 20%;
-    --primary: 217 91% 60%; /* Vibrant Blue */
-    --primary-foreground: 0 0% 100%; /* White text on blue */
-    --secondary: 220 15% 90%; /* Light cool gray for secondary elements */
-    --secondary-foreground: 220 10% 30%;
-    --muted: 220 15% 94%; /* Lighter muted */
-    --muted-foreground: 220 10% 45%;
-    --accent: 28 100% 60%; /* Warm Vibrant Orange */
-    --accent-foreground: 0 0% 100%; /* White text on orange */
+    --popover-foreground: 220 15% 15%;
+    --primary: 217 91% 60%; /* Vibrant Blue - unchanged */
+    --primary-foreground: 0 0% 100%; /* White text on blue - unchanged */
+    --secondary: 220 15% 92%; /* Slightly adjusted light cool gray */
+    --secondary-foreground: 220 10% 25%;
+    --muted: 220 15% 96%; /* Adjusted lighter muted */
+    --muted-foreground: 220 10% 40%;
+    --accent: 28 100% 62%; /* Slightly adjusted Warm Vibrant Orange */
+    --accent-foreground: 0 0% 100%; /* White text on orange - unchanged */
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 15% 88%;
-    --input: 220 15% 88%;
-    --ring: 217 91% 60%; /* Primary color for rings */
-    --chart-1: 217 91% 60%; /* primary */
-    --chart-2: 28 100% 60%;  /* accent */
-    --chart-3: 160 70% 45%; /* A teal/green */
-    --chart-4: 300 70% 55%; /* A purple */
-    --chart-5: 50 80% 55%;  /* A yellow/gold */
-    --radius: 0.5rem;
+    --border: 220 15% 85%; /* Slightly darker border for more definition */
+    --input: 220 15% 90%;
+    --ring: 217 91% 60%; 
+    --chart-1: 217 91% 60%; 
+    --chart-2: 28 100% 60%;  
+    --chart-3: 160 70% 45%; 
+    --chart-4: 300 70% 55%; 
+    --chart-5: 50 80% 55%;  
+    --radius: 0.75rem; /* Increased radius for a softer, modern look */
 
-    /* Sidebar variables, can be adjusted if a full sidebar is implemented */
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 15% 20%;
+    --sidebar-foreground: 220 15% 15%;
     --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 28 100% 60%;
+    --sidebar-accent: 28 100% 62%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 220 15% 88%;
+    --sidebar-border: 220 15% 85%;
     --sidebar-ring: 217 91% 60%;
   }
 
   .dark {
-    --background: 220 15% 10%; /* Dark cool gray background */
-    --foreground: 220 15% 95%; /* Light text */
-    --card: 220 15% 14%;
-    --card-foreground: 220 15% 95%;
-    --popover: 220 15% 14%;
-    --popover-foreground: 220 15% 95%;
-    --primary: 217 85% 65%; /* Slightly lighter blue for dark mode */
-    --primary-foreground: 220 15% 10%;
-    --secondary: 220 10% 20%;
-    --secondary-foreground: 220 15% 90%;
-    --muted: 220 10% 25%; 
-    --muted-foreground: 220 10% 60%;
-    --accent: 28 95% 65%; /* Slightly lighter orange for dark mode */
-    --accent-foreground: 220 15% 10%;
+    --background: 220 15% 8%; /* Darker cool gray background */
+    --foreground: 220 15% 98%; /* Brighter light text */
+    --card: 220 15% 12%;
+    --card-foreground: 220 15% 98%;
+    --popover: 220 15% 12%;
+    --popover-foreground: 220 15% 98%;
+    --primary: 217 85% 65%; 
+    --primary-foreground: 220 15% 8%;
+    --secondary: 220 10% 18%;
+    --secondary-foreground: 220 15% 92%;
+    --muted: 220 10% 22%; 
+    --muted-foreground: 220 10% 65%;
+    --accent: 28 95% 65%; 
+    --accent-foreground: 220 15% 8%;
     --destructive: 0 70% 55%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 10% 25%;
-    --input: 220 10% 25%;
+    --border: 220 10% 22%;
+    --input: 220 10% 22%;
     --ring: 217 85% 70%;
 
-    /* Dark Sidebar variables */
-    --sidebar-background: 220 15% 12%;
-    --sidebar-foreground: 220 15% 95%;
+    --sidebar-background: 220 15% 10%;
+    --sidebar-foreground: 220 15% 98%;
     --sidebar-primary: 217 85% 65%;
-    --sidebar-primary-foreground: 220 15% 10%;
+    --sidebar-primary-foreground: 220 15% 8%;
     --sidebar-accent: 28 95% 65%;
-    --sidebar-accent-foreground: 220 15% 10%;
-    --sidebar-border: 220 10% 25%;
+    --sidebar-accent-foreground: 220 15% 8%;
+    --sidebar-border: 220 10% 22%;
     --sidebar-ring: 217 85% 70%;
   }
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   * {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans; /* Ensure font-sans is applied */
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -88,9 +89,18 @@
   main {
     flex-grow: 1;
   }
+  section {
+    @apply py-16 md:py-24; /* Consistent vertical padding for sections */
+  }
 }
 
-/* For Tailwind responsive breakpoints if not already covered by ShadCN/default Tailwind */
-@screen xs {
-  /* Custom extra-small screen styles if needed, though Tailwind's `sm` is usually the smallest explicit breakpoint */
+/* Utility class for subtle fade-in-up animation */
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out forwards;
+  opacity: 0;
 }
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
+.delay-500 { animation-delay: 0.5s; }
