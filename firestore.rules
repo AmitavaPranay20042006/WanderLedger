@@ -1,0 +1,222 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated(request) {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    match /users/{userId} {
+      function isOwnerOfUserDoc(request, docUserId) {
+        return isAuthenticated(request) && request.auth.uid == docUserId;
+      }
+
+      function isValidUserCreatePayload(data, request) {
+        return data.uid == request.auth.uid &&
+               data.email is string && data.email == data.email.lower() &&
+               data.displayName is string &&
+               data.photoURL is string &&
+               data.createdAt == request.time;
+      }
+
+      function isValidUserUpdatePayload(oldData, newData, request) {
+        return newData.uid == oldData.uid &&
+               newData.createdAt == oldData.createdAt &&
+               (newData.email == oldData.email || (newData.email is string && newData.email == newData.email.lower())) &&
+               (!('displayName' in newData.diff(oldData).affectedKeys()) || newData.displayName is string) &&
+               (!('photoURL' in newData.diff(oldData).affectedKeys()) || newData.photoURL is string) &&
+               (!('lastLogin' in newData.diff(oldData).affectedKeys()) || newData.lastLogin == request.time);
+      }
+
+      allow read: if isAuthenticated(request);
+      allow create: if isOwnerOfUserDoc(request, userId) && isValidUserCreatePayload(request.resource.data, request);
+      allow update: if isOwnerOfUserDoc(request, userId) && isValidUserUpdatePayload(resource.data, request.resource.data, request);
+      allow delete: if isOwnerOfUserDoc(request, userId);
+    }
+
+    match /trips/{tripId} {
+
+      function isOwnerOfThisTrip(request, existingTripResource) {
+        return isAuthenticated(request) &&
+               'ownerId' in existingTripResource.data &&
+               existingTripResource.data.ownerId == request.auth.uid;
+      }
+
+      function isValidTripCreatePayload(data, request) {
+        return isAuthenticated(request) &&
+               data.ownerId == request.auth.uid &&
+               request.auth.uid in data.members &&
+               data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+               data.destination is string && data.destination.size() > 0 && data.destination.size() <= 100 &&
+               data.startDate is timestamp && data.endDate is timestamp && data.endDate >= data.startDate &&
+               data.members is list && data.members.size() > 0 &&
+               data.coverPhotoURL is string && data.dataAiHint is string &&
+               (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+               ('baseCurrency' in data && data.baseCurrency is string && data.baseCurrency.size() == 3) &&
+               data.createdAt == request.time;
+      }
+
+      function isValidTripCoreFieldsUpdatePayload(existingData, incomingData) {
+        return incomingData.name is string && incomingData.name.size() > 0 && incomingData.name.size() <= 100 &&
+               incomingData.destination is string && incomingData.destination.size() > 0 && incomingData.destination.size() <= 100 &&
+               incomingData.startDate is timestamp && incomingData.endDate is timestamp && incomingData.endDate >= incomingData.startDate &&
+               incomingData.members is list && incomingData.members.size() > 0 && existingData.ownerId in incomingData.members &&
+               incomingData.coverPhotoURL is string && incomingData.dataAiHint is string &&
+               (!('description' in incomingData) || (incomingData.description is string && incomingData.description.size() <= 500)) &&
+               ('baseCurrency' in incomingData && incomingData.baseCurrency is string && incomingData.baseCurrency.size() == 3) &&
+               incomingData.ownerId == existingData.ownerId &&
+               incomingData.createdAt == existingData.createdAt;
+      }
+
+      function isValidTripMembersOnlyUpdatePayload(existingData, incomingData) {
+        return incomingData.members is list && incomingData.members.size() >= 0 &&
+               existingData.ownerId in incomingData.members;
+      }
+
+      // ----- MODIFIED FUNCTION -----
+      function canAccessSubcollection(request, tripId) {
+        // Check authentication first, as it's cheap
+        if (!isAuthenticated(request)) {
+          return false;
+        }
+        // Get the parent trip document
+        let tripDocument = get(/databases/$(database)/documents/trips/$(tripId));
+
+        // Check if the document exists and if the user is a member
+        return tripDocument.exists() &&
+               'members' in tripDocument.data &&
+               tripDocument.data.members is list &&
+               request.auth.uid in tripDocument.data.members;
+      }
+      // ----- END MODIFIED FUNCTION -----
+
+      allow create: if isValidTripCreatePayload(request.resource.data, request);
+
+      allow read: if isAuthenticated(request) &&
+                  'members' in resource.data &&
+                  resource.data.members is list &&
+                  request.auth.uid in resource.data.members;
+
+      allow list: if isAuthenticated(request);
+
+      allow update: if isOwnerOfThisTrip(request, resource) &&
+                    (
+                      (request.resource.data.diff(resource.data).affectedKeys().hasAny(['name', 'destination', 'startDate', 'endDate', 'description', 'coverPhotoURL', 'dataAiHint', 'baseCurrency']) &&
+                       isValidTripCoreFieldsUpdatePayload(resource.data, request.resource.data)) ||
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+                       isValidTripMembersOnlyUpdatePayload(resource.data, request.resource.data))
+                    );
+
+      allow delete: if isOwnerOfThisTrip(request, resource);
+
+      match /expenses/{expenseId} {
+        function isValidSimplifiedExpenseCreate(data, request) {
+          return request.auth.uid == data.paidBy &&
+                 data.createdAt == request.time &&
+                 data.description is string && data.description.size() > 0 && data.description.size() <= 100 &&
+                 data.amount is number && data.amount > 0;
+        }
+
+        function isValidSimplifiedExpenseUpdate(oldData, newData, request) {
+          return request.auth.uid == oldData.paidBy &&
+                 newData.paidBy == oldData.paidBy &&
+                 newData.createdAt == oldData.createdAt &&
+                 newData.description is string && newData.description.size() > 0 && newData.description.size() <= 100 &&
+                 newData.amount is number && newData.amount > 0;
+        }
+
+        allow read, list: if canAccessSubcollection(request, tripId);
+        allow create: if canAccessSubcollection(request, tripId) && isValidSimplifiedExpenseCreate(request.resource.data, request);
+        allow update: if canAccessSubcollection(request, tripId) && isValidSimplifiedExpenseUpdate(resource.data, request.resource.data, request);
+        allow delete: if canAccessSubcollection(request, tripId) &&
+                      get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+      }
+
+      match /itineraryEvents/{eventId} {
+        function isValidItineraryEventPayload(data, request, isCreate, oldData) {
+          return data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+                 data.date is timestamp &&
+                 data.type is string && data.type.size() > 0 &&
+                 (!('time' in data) || (data.time is string && data.time.matches('^([01][0-9]|2[0-3]):([0-5][0-9])$'))) &&
+                 (!('endDate' in data) || (data.endDate is timestamp && data.endDate >= data.date)) &&
+                 (!('endTime' in data) || (data.endTime is string && data.endTime.matches('^([01][0-9]|2[0-3]):([0-5][0-9])$'))) &&
+                 (!('location' in data) || (data.location is string && data.location.size() <= 150)) &&
+                 (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+                 (isCreate ? data.createdAt == request.time : data.createdAt == oldData.createdAt);
+        }
+
+        allow read, list: if canAccessSubcollection(request, tripId);
+        allow create: if canAccessSubcollection(request, tripId) && isValidItineraryEventPayload(request.resource.data, request, true, null);
+        allow update: if canAccessSubcollection(request, tripId) && isValidItineraryEventPayload(request.resource.data, request, false, resource.data);
+        allow delete: if canAccessSubcollection(request, tripId);
+      }
+
+      match /packingItems/{itemId} {
+        function isValidPackingItemCreatePayload(data, request) {
+          return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+                 data.packed == false &&
+                 data.addedBy == request.auth.uid &&
+                 data.createdAt == request.time;
+        }
+
+        function isValidPackingItemUpdatePayload(oldData, newData, tripId, request) {
+          let parent = get(/databases/$(database)/documents/trips/$(tripId));
+          return parent.exists() &&
+                 parent.data.ownerId is string &&
+                 newData.name is string && newData.name.size() > 0 && newData.name.size() <= 100 &&
+                 newData.packed is bool &&
+                 newData.addedBy == oldData.addedBy &&
+                 newData.createdAt == oldData.createdAt &&
+                 (
+                   (newData.packed != oldData.packed && newData.lastCheckedBy == request.auth.uid) ||
+                   (newData.packed == oldData.packed && 'lastCheckedBy' in newData.diff(oldData).affectedKeys() && newData.lastCheckedBy == request.auth.uid) ||
+                   (newData.packed == oldData.packed && !('lastCheckedBy' in newData.diff(oldData).affectedKeys()))
+                 ) &&
+                 (!('name' in newData.diff(oldData).affectedKeys()) || oldData.addedBy == request.auth.uid || parent.data.ownerId == request.auth.uid);
+        }
+
+        function userCanDeletePackingItem(request, tripId, resource) {
+          let parent = get(/databases/$(database)/documents/trips/$(tripId));
+          return parent.exists() &&
+                 (resource.data.addedBy == request.auth.uid || parent.data.ownerId == request.auth.uid);
+        }
+
+        allow read, list: if canAccessSubcollection(request, tripId);
+        allow create: if canAccessSubcollection(request, tripId) && isValidPackingItemCreatePayload(request.resource.data, request);
+        allow update: if canAccessSubcollection(request, tripId) && isValidPackingItemUpdatePayload(resource.data, request.resource.data, tripId, request);
+        allow delete: if canAccessSubcollection(request, tripId) && userCanDeletePackingItem(request, tripId, resource);
+      }
+
+      match /recordedPayments/{paymentId} {
+        function isValidRecordedPaymentCreate(data, request, tripId) {
+          let trip = get(/databases/$(database)/documents/trips/$(tripId));
+          return trip.exists() &&
+                 trip.data.members is list &&
+                 trip.data.baseCurrency is string &&
+                 data.recordedBy == request.auth.uid &&
+                 data.dateRecorded == request.time &&
+                 data.fromUserId in trip.data.members &&
+                 data.toUserId in trip.data.members &&
+                 data.fromUserId != data.toUserId &&
+                 data.amount is number && data.amount > 0 &&
+                 data.currency == trip.data.baseCurrency &&
+                 (
+                   !('notes' in data) ||
+                   data.notes == null ||
+                   data.notes == '' || // Added robust check for empty string
+                   (data.notes is string && data.notes.size() <= 250)
+                 );
+        }
+
+        allow read, list: if canAccessSubcollection(request, tripId);
+        allow create: if canAccessSubcollection(request, tripId) &&
+                      isValidRecordedPaymentCreate(request.resource.data, request, tripId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
+
+    
