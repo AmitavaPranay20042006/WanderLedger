@@ -75,16 +75,13 @@ service cloud.firestore {
                existingData.ownerId in incomingData.members;
       }
 
-      // General function to check if a user can access (read/list) a subcollection
       function canAccessSubcollection(request, tripId) {
-        if (!isAuthenticated(request)) {
-          return false;
-        }
-        let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
-        return tripDoc.exists() &&
-               'members' in tripDoc.data &&
-               tripDoc.data.members is list &&
-               request.auth.uid in tripDoc.data.members;
+        // This is the user's existing function which doesn't use 'let'
+        return isAuthenticated(request) &&
+               exists(/databases/$(database)/documents/trips/$(tripId)) &&
+               'members' in get(/databases/$(database)/documents/trips/$(tripId)).data &&
+               get(/databases/$(database)/documents/trips/$(tripId)).data.members is list &&
+               request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members;
       }
 
       allow create: if isValidTripCreatePayload(request.resource.data, request);
@@ -94,7 +91,7 @@ service cloud.firestore {
                   resource.data.members is list &&
                   request.auth.uid in resource.data.members;
 
-      allow list: if isAuthenticated(request); // Be cautious with list if not further restricted, e.g., by queries
+      allow list: if isAuthenticated(request);
 
       allow update: if isOwnerOfThisTrip(request, resource) &&
                     (
@@ -184,50 +181,56 @@ service cloud.firestore {
         allow delete: if canAccessSubcollection(request, tripId) && userCanDeletePackingItem(request, tripId, resource);
       }
 
+      // Corrected block for recordedPayments
       match /recordedPayments/{paymentId} {
-        // Function to validate the data for a new recorded payment
-        // It expects the pre-fetched parent trip document as 'tripDoc'
-        function isValidRecordedPaymentCreate(incomingData, request, tripDoc) {
-          // Basic data validation for the incoming payment
-          return incomingData.recordedBy == request.auth.uid &&
-                 incomingData.dateRecorded == request.time && // For serverTimestamp
-                 incomingData.fromUserId is string &&
-                 incomingData.toUserId is string &&
-                 incomingData.fromUserId != incomingData.toUserId &&
-                 incomingData.amount is number && incomingData.amount > 0 &&
-                 incomingData.currency is string &&
-                 // Validations against the parent trip document's data
-                 incomingData.fromUserId in tripDoc.data.members &&
-                 incomingData.toUserId in tripDoc.data.members &&
-                 incomingData.currency == tripDoc.data.baseCurrency &&
-                 // Optional notes validation
-                 (
-                   !('notes' in incomingData) || // notes field doesn't exist
-                   incomingData.notes == null || // notes is explicitly null
-                   (incomingData.notes is string && incomingData.notes.size() <= 250) // notes is a string and within size limit
+
+        // Helper function for creating recorded payments.
+        // Uses 'let' internally for efficiency and readability, which is standard and correct within a function.
+        function validateAndAuthorizeRecordedPaymentCreate(data, request, tripId) {
+          // 1. Authenticated? (Checked by caller: canAccessSubcollection for read, direct check for create)
+          //    No, it's better to check auth here too for robustness.
+          if (!isAuthenticated(request)) {
+            return false;
+          }
+
+          // 2. Get parent trip document
+          let parentTrip = get(/databases/$(database)/documents/trips/$(tripId));
+
+          // 3. Parent trip exists, user is a member, and baseCurrency is set correctly?
+          if (!(parentTrip.exists() &&
+                'members' in parentTrip.data && parentTrip.data.members is list &&
+                request.auth.uid in parentTrip.data.members && // Ensures requesting user is a member
+                'baseCurrency' in parentTrip.data && parentTrip.data.baseCurrency is string)) {
+            return false;
+          }
+
+          // 4. Validate incoming payment data against parent trip and request
+          return data.recordedBy == request.auth.uid && // Ensures the 'recordedBy' field matches the authenticated user
+                 data.dateRecorded == request.time &&    // Correctly handles serverTimestamp for create
+                 data.fromUserId in parentTrip.data.members && // Payer must be a trip member
+                 data.toUserId in parentTrip.data.members &&   // Receiver must be a trip member
+                 data.fromUserId != data.toUserId &&
+                 data.amount is number && data.amount > 0 &&
+                 data.currency == parentTrip.data.baseCurrency && // Currency must match trip's base currency
+                 ( // Notes validation
+                   !('notes' in data) || // notes field is optional
+                   data.notes == null ||   // notes can be explicitly null
+                   data.notes == '' ||     // notes can be an empty string
+                   (data.notes is string && data.notes.size() <= 250) // if notes is a string, check size
                  );
         }
 
-        allow read, list: if
-          (let trip = get(/databases/$(database)/documents/trips/$(tripId));
-            isAuthenticated(request) &&
-            trip.exists() &&
-            'members' in trip.data && trip.data.members is list &&
-            request.auth.uid in trip.data.members
-          );
+        // Uses the user's existing canAccessSubcollection (which makes multiple get() calls but doesn't use 'let' directly in the allow line)
+        allow read, list: if canAccessSubcollection(request, tripId);
 
-        allow create: if
-          (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId)); // Fetch parent trip once
-            isAuthenticated(request) && // 1. User is authenticated
-            tripDoc.exists() && // 2. Parent trip document exists
-            'members' in tripDoc.data && tripDoc.data.members is list && // 3. members field is correct type
-            request.auth.uid in tripDoc.data.members && // 4. Authenticated user is a member of the trip
-            'baseCurrency' in tripDoc.data && tripDoc.data.baseCurrency is string && // 5. baseCurrency exists and is a string
-            isValidRecordedPaymentCreate(request.resource.data, request, tripDoc) // 6. New payment data is valid
-          );
+        // Create rule calls the comprehensive validation function
+        allow create: if validateAndAuthorizeRecordedPaymentCreate(request.resource.data, request, tripId);
 
-        allow update, delete: if false; // No updates or deletes allowed for recorded payments
+        allow update, delete: if false; // Explicitly disallow updates and deletes
       }
-    }
-  }
-}
+
+    } // End of match /trips/{tripId}
+  }   // End of match /databases/{database}/documents
+}     // End of service cloud.firestore
+
+    
