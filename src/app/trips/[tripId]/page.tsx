@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DollarSign, Users, ListChecks, MapPin, BarChart3, FileText, CalendarDays, Scale, Loader2, AlertTriangle, Edit3 } from 'lucide-react';
+import { DollarSign, Users, ListChecks, MapPin, BarChart3, FileText, CalendarDays, Scale, Loader2, AlertTriangle, Edit3, Sparkles } from 'lucide-react';
 import Image from 'next/image';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
@@ -193,37 +193,37 @@ export default function TripDetailPage() {
 
   return (
     <div className="space-y-10 md:space-y-12 pb-16">
-      <div className="relative h-72 md:h-96 rounded-xl md:rounded-2xl overflow-hidden shadow-2xl group">
+      <div className="relative h-80 md:h-[450px] rounded-xl md:rounded-2xl overflow-hidden shadow-2xl group">
         <Image
           src={trip.coverPhotoURL}
           alt={trip.name}
           fill
           style={{ objectFit: 'cover' }}
           className="transition-transform duration-700 group-hover:scale-110 ease-in-out"
-          data-ai-hint={trip.dataAiHint || 'travel landscape'}
+          data-ai-hint={trip.dataAiHint || 'travel landscape exotic'}
           sizes="(max-width: 768px) 100vw, 1200px"
           priority
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent transition-opacity duration-500 group-hover:from-black/90 group-hover:via-black/60"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent transition-opacity duration-500 group-hover:from-black/90 group-hover:via-black/70"></div>
         <div className="absolute bottom-0 left-0 p-6 md:p-10 text-white">
-          <h1 className="text-4xl md:text-6xl font-extrabold drop-shadow-lg tracking-tight">{trip.name}</h1>
-          <p className="text-lg md:text-2xl text-gray-100 flex items-center mt-2 md:mt-4 drop-shadow-md">
+          <h1 className="text-4xl md:text-7xl font-extrabold drop-shadow-lg tracking-tight">{trip.name}</h1>
+          <p className="text-lg md:text-2xl text-gray-100 flex items-center mt-3 md:mt-5 drop-shadow-md">
             <MapPin className="mr-3 h-5 w-5 md:h-6 md:w-6 flex-shrink-0" /> {trip.destination}
           </p>
-          <p className="text-base md:text-lg text-gray-200 flex items-center mt-1.5 md:mt-2 drop-shadow-md">
+          <p className="text-base md:text-lg text-gray-200 flex items-center mt-2 md:mt-3 drop-shadow-md">
             <CalendarDays className="mr-3 h-4 w-4 md:h-5 md:w-5 flex-shrink-0" /> {trip.startDate instanceof Date ? trip.startDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : ''} - {trip.endDate instanceof Date ? trip.endDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : ''}
           </p>
         </div>
         {currentUser?.uid === trip.ownerId && (
-          <Button variant="outline" size="icon" className="absolute top-5 right-5 bg-background/70 hover:bg-background text-foreground shadow-lg backdrop-blur-sm transition-all hover:scale-110 active:scale-95">
-            <Edit3 className="h-5 w-5" />
+          <Button variant="outline" size="icon" className="absolute top-5 right-5 bg-background/70 hover:bg-background text-foreground shadow-lg backdrop-blur-sm transition-all hover:scale-110 active:scale-95 group">
+            <Edit3 className="h-5 w-5 group-hover:text-primary transition-colors" />
             <span className="sr-only">Edit Trip Details</span>
           </Button>
         )}
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-6 gap-2 mb-10 shadow-lg bg-muted/70 dark:bg-muted/30 p-2 rounded-xl h-auto sticky top-[88px] z-40 backdrop-blur-md bg-background/80 dark:bg-background/70">
+        <TabsList className="grid w-full grid-cols-3 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-6 gap-2 mb-10 shadow-lg bg-gradient-to-r from-muted/60 to-secondary/40 dark:from-muted/20 dark:to-secondary/10 p-2 rounded-xl h-auto sticky top-[88px] z-40 backdrop-blur-md bg-background/80 dark:bg-background/70 border dark:border-border/30">
           {[
             {value: "overview", label: "Overview", icon: BarChart3},
             {value: "expenses", label: "Expenses", icon: DollarSign},
@@ -232,7 +232,7 @@ export default function TripDetailPage() {
             {value: "itinerary", label: "Itinerary", icon: FileText},
             {value: "packing", label: "Packing", icon: ListChecks},
           ].map(tab => (
-            <TabsTrigger key={tab.value} value={tab.value} className="flex-1 py-3 sm:py-3.5 text-xs sm:text-sm flex items-center justify-center gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-xl transition-all duration-200 ease-in-out rounded-lg hover:bg-primary/10 data-[state=active]:hover:bg-primary/90">
+            <TabsTrigger key={tab.value} value={tab.value} className="flex-1 py-3 sm:py-3.5 text-xs sm:text-sm flex items-center justify-center gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-xl transition-all duration-200 ease-in-out rounded-lg hover:bg-primary/10 data-[state=active]:hover:bg-primary/90 transform hover:scale-105 data-[state=active]:scale-105">
               <tab.icon className="h-4 w-4 sm:h-5 sm:w-5" /> <span className="hidden xs:hidden sm:inline font-medium">{tab.label}</span>
             </TabsTrigger>
           ))}
@@ -258,26 +258,25 @@ export default function TripDetailPage() {
         <TabsContent value="settlement">
           {isLoadingExpenses || isLoadingMembers || isLoadingTrip || isLoadingRecordedPayments ? <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary mt-12" /> :
             (errorExpenses || errorRecordedPayments || errorMembers) ? (
-                 <Card className="text-center py-10 shadow-xl border-destructive bg-destructive/5">
+                <Card className="text-center py-6 shadow-sm border-destructive bg-destructive/5">
                     <CardHeader>
-                        <div className="mx-auto bg-destructive/10 p-4 rounded-full w-fit mb-4">
-                            <AlertTriangle className="h-12 w-12 text-destructive" />
+                        <div className="mx-auto bg-destructive/10 p-3 rounded-full w-fit mb-3">
+                            <AlertTriangle className="h-10 w-10 text-destructive" />
                         </div>
-                        <CardTitle className="text-2xl text-destructive">Data Loading Error</CardTitle>
+                        <CardTitle className="text-xl text-destructive">Data Loading Error</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-destructive/90 text-base">
+                        <p className="text-sm text-destructive/90">
                             {errorExpenses ? `Failed to load expenses: ${errorExpenses.message}; ` : ''}
                             {errorRecordedPayments ? `Failed to load recorded payments: ${errorRecordedPayments.message}; ` : ''}
                             {errorMembers && !errorExpenses && !errorRecordedPayments ? `Failed to load member details: ${errorMembers.message}` : ''}
                         </p>
-                        <p className="text-sm text-muted-foreground mt-3">
+                        <p className="text-xs text-muted-foreground mt-2">
                             This usually indicates a permission issue. Ensure the logged-in user is a member of this trip and that Firestore rules allow access to subcollections.
                         </p>
-                         <Button variant="outline" size="lg" className="mt-6" onClick={() => {
+                         <Button variant="outline" size="sm" className="mt-4" onClick={() => {
                             if (errorExpenses) refetchExpenses();
                             if (errorRecordedPayments) refetchRecordedPayments();
-                            if (errorMembers) queryClient.invalidateQueries({queryKey: ['memberDetails']});
                          }}>
                             Try Reloading Data
                          </Button>

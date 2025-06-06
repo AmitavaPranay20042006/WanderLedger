@@ -4,7 +4,7 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
-import { PlusCircle, LayoutGrid, ListFilter, Search, FolderOpen, Loader2, AlertTriangle, MapPin, CalendarDays, ArrowRight, Star } from 'lucide-react';
+import { PlusCircle, LayoutGrid, ListFilter, Search, FolderOpen, Loader2, AlertTriangle, MapPin, CalendarDays, ArrowRight, Star, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
@@ -55,9 +55,9 @@ async function fetchUserTrips(userId: string | undefined | null): Promise<Trip[]
 
 function TripCard({ trip }: { trip: Trip }) {
   return (
-    <Card className="overflow-hidden shadow-lg hover:shadow-xl dark:shadow-primary/10 dark:hover:shadow-primary/20 transition-all duration-300 ease-in-out group transform hover:-translate-y-2 border border-transparent hover:border-primary/30 dark:bg-card/80 dark:hover:border-primary/50">
+    <Card className="overflow-hidden shadow-lg hover:shadow-xl-light dark:shadow-primary/10 dark:hover:shadow-xl-dark transition-all duration-300 ease-in-out group transform hover:-translate-y-2 hover:scale-102 border border-transparent hover:border-primary/30 dark:bg-card/80 dark:hover:border-primary/50">
       <Link href={`/trips/${trip.id}`} className="block">
-        <div className="relative h-56 w-full group-hover:opacity-95 transition-opacity"> {/* Increased height */}
+        <div className="relative h-60 w-full group-hover:opacity-95 transition-opacity"> {/* Increased height */}
           <Image
             src={trip.coverPhotoURL}
             alt={trip.name}
@@ -67,9 +67,9 @@ function TripCard({ trip }: { trip: Trip }) {
             className="transition-transform duration-500 group-hover:scale-105"
             data-ai-hint={trip.dataAiHint}
           />
-           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/30 to-transparent group-hover:from-black/75 transition-colors"></div>
-           <div className="absolute top-3 right-3 bg-accent/80 text-accent-foreground text-xs font-semibold px-2.5 py-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100 flex items-center">
-            <Star className="h-3.5 w-3.5 mr-1 fill-current" /> Popular Pick
+           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent group-hover:from-black/80 transition-colors"></div>
+           <div className="absolute top-3.5 right-3.5 bg-accent/90 text-accent-foreground text-xs font-semibold px-3 py-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100 flex items-center shadow-md">
+            <Star className="h-3.5 w-3.5 mr-1.5 fill-current" /> Popular Pick
            </div>
         </div>
         <CardHeader className="pb-3 pt-5">
@@ -175,7 +175,7 @@ export default function DashboardPage() {
           <h1 className="text-5xl font-bold tracking-tight">Welcome, {user?.displayName?.split(' ')[0] || 'Traveler'}!</h1>
           <p className="text-xl text-muted-foreground mt-2">Ready for your next journey? Here are your plans.</p>
         </div>
-        <Button asChild size="lg" className="shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 text-base px-8 py-6 bg-accent hover:bg-accent/90 text-accent-foreground group">
+        <Button asChild size="lg" className="shadow-xl hover:shadow-2xl transition-all duration-300 ease-in-out transform hover:-translate-y-1.5 text-lg px-10 py-7 bg-gradient-to-r from-accent to-pink-500 hover:from-accent/90 hover:to-pink-500/90 text-accent-foreground group">
           <Link href="/trips/new">
             <PlusCircle className="mr-2.5 h-5 w-5 group-hover:animate-subtle-pulse" />
             Create New Trip
@@ -183,20 +183,20 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <Card className="p-6 shadow-lg border dark:bg-card/80">
+      <Card className="p-6 shadow-lg border dark:bg-card/80 dark:border-border/50">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-grow">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               placeholder="Search trips by name or destination..."
-              className="pl-12 h-14 text-base rounded-lg" 
+              className="pl-12 h-14 text-base rounded-lg shadow-inner" 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <div className="flex gap-4">
             <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-full sm:w-[220px] h-14 text-base rounded-lg">
+              <SelectTrigger className="w-full sm:w-[220px] h-14 text-base rounded-lg shadow-sm">
                 <ListFilter className="mr-2.5 h-5 w-5" />
                 <SelectValue placeholder="Filter trips" />
               </SelectTrigger>
@@ -211,7 +211,7 @@ export default function DashboardPage() {
       </Card>
 
       {filteredTrips.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10"> {/* Increased gap */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10"> 
           {filteredTrips.map((trip) => (
             <TripCard key={trip.id} trip={trip} />
           ))}
@@ -219,7 +219,7 @@ export default function DashboardPage() {
       ) : (
         <Card className="col-span-full text-center py-20 shadow-lg border-dashed border-border/70 dark:bg-card/50 my-10">
           <CardHeader>
-            <div className="mx-auto bg-muted/70 dark:bg-muted/30 p-6 rounded-full w-fit mb-8">
+            <div className="mx-auto bg-gradient-to-br from-muted/70 to-secondary/50 dark:from-muted/30 dark:to-secondary/20 p-6 rounded-full w-fit mb-8 shadow-inner">
               <FolderOpen className="h-20 w-20 text-muted-foreground" />
             </div>
             <CardTitle className="text-4xl">
@@ -237,7 +237,7 @@ export default function DashboardPage() {
             {!(searchTerm || filter !== 'all') && (!trips || trips.length === 0) && !queryError && (
                <Button asChild size="lg" className="mt-6 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 text-base px-8 py-6 bg-accent hover:bg-accent/90 text-accent-foreground group">
                 <Link href="/trips/new">
-                  <PlusCircle className="mr-2.5 h-5 w-5 group-hover:animate-subtle-pulse" />
+                  <Sparkles className="mr-2.5 h-5 w-5 group-hover:animate-subtle-pulse" />
                   Plan Your First Trip
                 </Link>
               </Button>
