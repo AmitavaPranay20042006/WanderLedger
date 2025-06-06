@@ -75,22 +75,17 @@ service cloud.firestore {
                existingData.ownerId in incomingData.members;
       }
 
-      // ----- MODIFIED FUNCTION -----
+      // MODIFIED canAccessSubcollection
       function canAccessSubcollection(request, tripId) {
-        // Check authentication first, as it's cheap
         if (!isAuthenticated(request)) {
           return false;
         }
-        // Get the parent trip document
         let tripDocument = get(/databases/$(database)/documents/trips/$(tripId));
-
-        // Check if the document exists and if the user is a member
         return tripDocument.exists() &&
                'members' in tripDocument.data &&
                tripDocument.data.members is list &&
                request.auth.uid in tripDocument.data.members;
       }
-      // ----- END MODIFIED FUNCTION -----
 
       allow create: if isValidTripCreatePayload(request.resource.data, request);
 
@@ -99,7 +94,7 @@ service cloud.firestore {
                   resource.data.members is list &&
                   request.auth.uid in resource.data.members;
 
-      allow list: if isAuthenticated(request);
+      allow list: if isAuthenticated(request); // Note: For 'list', often more specific rules are needed to prevent listing all trips. Consider if request.auth.uid needs to be involved.
 
       allow update: if isOwnerOfThisTrip(request, resource) &&
                     (
@@ -189,30 +184,45 @@ service cloud.firestore {
         allow delete: if canAccessSubcollection(request, tripId) && userCanDeletePackingItem(request, tripId, resource);
       }
 
+      // MODIFIED recordedPayments block
       match /recordedPayments/{paymentId} {
-        function isValidRecordedPaymentCreate(data, request, tripId) {
-          let trip = get(/databases/$(database)/documents/trips/$(tripId));
-          return trip.exists() &&
-                 trip.data.members is list &&
-                 trip.data.baseCurrency is string &&
+        // Modified to take tripDocument as a parameter
+        function isValidRecordedPaymentCreate(data, request, tripDocument) {
+          return tripDocument.data.baseCurrency is string &&
                  data.recordedBy == request.auth.uid &&
                  data.dateRecorded == request.time &&
-                 data.fromUserId in trip.data.members &&
-                 data.toUserId in trip.data.members &&
+                 data.fromUserId in tripDocument.data.members &&
+                 data.toUserId in tripDocument.data.members &&
                  data.fromUserId != data.toUserId &&
                  data.amount is number && data.amount > 0 &&
-                 data.currency == trip.data.baseCurrency &&
+                 data.currency == tripDocument.data.baseCurrency &&
                  (
                    !('notes' in data) ||
                    data.notes == null ||
-                   data.notes == '' || // Added robust check for empty string
+                   data.notes == '' || // Added check for empty string explicitly if preferred
                    (data.notes is string && data.notes.size() <= 250)
                  );
         }
 
-        allow read, list: if canAccessSubcollection(request, tripId);
-        allow create: if canAccessSubcollection(request, tripId) &&
-                      isValidRecordedPaymentCreate(request.resource.data, request, tripId);
+        allow read, list: if
+          isAuthenticated(request) &&
+          (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
+            tripDoc.exists() &&
+            'members' in tripDoc.data &&
+            tripDoc.data.members is list &&
+            request.auth.uid in tripDoc.data.members
+          );
+
+        allow create: if
+          isAuthenticated(request) &&
+          (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
+            tripDoc.exists() &&
+            'members' in tripDoc.data &&
+            tripDoc.data.members is list &&
+            request.auth.uid in tripDoc.data.members &&
+            isValidRecordedPaymentCreate(request.resource.data, request, tripDoc) // Pass tripDoc
+          );
+
         allow update, delete: if false;
       }
     }
