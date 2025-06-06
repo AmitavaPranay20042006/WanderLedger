@@ -1,6 +1,7 @@
 
 'use client';
 
+import React from 'react'; // Added this line
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle, DollarSign, ListChecks, MapPin, Users, ArrowRight, Star, Zap, TrendingUp, Palette } from 'lucide-react';
