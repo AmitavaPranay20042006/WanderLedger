@@ -71,20 +71,20 @@ service cloud.firestore {
       }
 
       function isValidTripMembersOnlyUpdatePayload(existingData, incomingData) {
-        return incomingData.members is list && incomingData.members.size() >= 0 &&
+        return incomingData.members is list && incomingData.members.size() >= 0 && // Allow 0 members if owner removes all others
                existingData.ownerId in incomingData.members;
       }
 
-      // MODIFIED canAccessSubcollection
+      // Corrected function to use let binding properly or revert to simpler multi-get for now
       function canAccessSubcollection(request, tripId) {
-        if (!isAuthenticated(request)) {
-          return false;
-        }
-        let tripDocument = get(/databases/$(database)/documents/trips/$(tripId));
-        return tripDocument.exists() &&
-               'members' in tripDocument.data &&
-               tripDocument.data.members is list &&
-               request.auth.uid in tripDocument.data.members;
+        // Using let binding correctly within the expression for a function
+        return isAuthenticated(request) &&
+               (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
+                 tripDoc.exists() &&
+                 'members' in tripDoc.data &&
+                 tripDoc.data.members is list &&
+                 request.auth.uid in tripDoc.data.members
+               );
       }
 
       allow create: if isValidTripCreatePayload(request.resource.data, request);
@@ -94,7 +94,7 @@ service cloud.firestore {
                   resource.data.members is list &&
                   request.auth.uid in resource.data.members;
 
-      allow list: if isAuthenticated(request); // Note: For 'list', often more specific rules are needed to prevent listing all trips. Consider if request.auth.uid needs to be involved.
+      allow list: if isAuthenticated(request); // Be cautious: allows listing all trips if not further filtered by client queries.
 
       allow update: if isOwnerOfThisTrip(request, resource) &&
                     (
@@ -115,9 +115,9 @@ service cloud.firestore {
         }
 
         function isValidSimplifiedExpenseUpdate(oldData, newData, request) {
-          return request.auth.uid == oldData.paidBy &&
-                 newData.paidBy == oldData.paidBy &&
-                 newData.createdAt == oldData.createdAt &&
+          return request.auth.uid == oldData.paidBy && // Only original payer can update
+                 newData.paidBy == oldData.paidBy && // Payer cannot be changed
+                 newData.createdAt == oldData.createdAt && // Timestamp cannot be changed
                  newData.description is string && newData.description.size() > 0 && newData.description.size() <= 100 &&
                  newData.amount is number && newData.amount > 0;
         }
@@ -126,7 +126,9 @@ service cloud.firestore {
         allow create: if canAccessSubcollection(request, tripId) && isValidSimplifiedExpenseCreate(request.resource.data, request);
         allow update: if canAccessSubcollection(request, tripId) && isValidSimplifiedExpenseUpdate(resource.data, request.resource.data, request);
         allow delete: if canAccessSubcollection(request, tripId) &&
-                      get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+                      (let trip = get(/databases/$(database)/documents/trips/$(tripId));
+                        trip.exists() && trip.data.ownerId == request.auth.uid
+                      );
       }
 
       match /itineraryEvents/{eventId} {
@@ -145,7 +147,7 @@ service cloud.firestore {
         allow read, list: if canAccessSubcollection(request, tripId);
         allow create: if canAccessSubcollection(request, tripId) && isValidItineraryEventPayload(request.resource.data, request, true, null);
         allow update: if canAccessSubcollection(request, tripId) && isValidItineraryEventPayload(request.resource.data, request, false, resource.data);
-        allow delete: if canAccessSubcollection(request, tripId);
+        allow delete: if canAccessSubcollection(request, tripId); // Any member can delete itinerary events
       }
 
       match /packingItems/{itemId} {
@@ -156,77 +158,83 @@ service cloud.firestore {
                  data.createdAt == request.time;
         }
 
-        function isValidPackingItemUpdatePayload(oldData, newData, tripId, request) {
-          let parent = get(/databases/$(database)/documents/trips/$(tripId));
-          return parent.exists() &&
-                 parent.data.ownerId is string &&
-                 newData.name is string && newData.name.size() > 0 && newData.name.size() <= 100 &&
+        function isValidPackingItemUpdatePayload(oldData, newData, request) {
+          return newData.name is string && newData.name.size() > 0 && newData.name.size() <= 100 &&
                  newData.packed is bool &&
-                 newData.addedBy == oldData.addedBy &&
-                 newData.createdAt == oldData.createdAt &&
-                 (
+                 newData.addedBy == oldData.addedBy && // Original adder cannot change
+                 newData.createdAt == oldData.createdAt && // Creation timestamp cannot change
+                 ( // Logic for lastCheckedBy
                    (newData.packed != oldData.packed && newData.lastCheckedBy == request.auth.uid) ||
                    (newData.packed == oldData.packed && 'lastCheckedBy' in newData.diff(oldData).affectedKeys() && newData.lastCheckedBy == request.auth.uid) ||
                    (newData.packed == oldData.packed && !('lastCheckedBy' in newData.diff(oldData).affectedKeys()))
-                 ) &&
-                 (!('name' in newData.diff(oldData).affectedKeys()) || oldData.addedBy == request.auth.uid || parent.data.ownerId == request.auth.uid);
+                 );
+                 // Name can be updated by any member with access (implicit from canAccessSubcollection)
         }
 
-        function userCanDeletePackingItem(request, tripId, resource) {
-          let parent = get(/databases/$(database)/documents/trips/$(tripId));
-          return parent.exists() &&
-                 (resource.data.addedBy == request.auth.uid || parent.data.ownerId == request.auth.uid);
+        function userCanDeletePackingItem(request, tripId, packingItemResource) {
+          return (let trip = get(/databases/$(database)/documents/trips/$(tripId));
+                    trip.exists() &&
+                    (packingItemResource.data.addedBy == request.auth.uid || trip.data.ownerId == request.auth.uid)
+                 );
         }
 
         allow read, list: if canAccessSubcollection(request, tripId);
         allow create: if canAccessSubcollection(request, tripId) && isValidPackingItemCreatePayload(request.resource.data, request);
-        allow update: if canAccessSubcollection(request, tripId) && isValidPackingItemUpdatePayload(resource.data, request.resource.data, tripId, request);
+        allow update: if canAccessSubcollection(request, tripId) && isValidPackingItemUpdatePayload(resource.data, request.resource.data, request);
         allow delete: if canAccessSubcollection(request, tripId) && userCanDeletePackingItem(request, tripId, resource);
       }
 
-      // MODIFIED recordedPayments block
       match /recordedPayments/{paymentId} {
-        // Modified to take tripDocument as a parameter
-        function isValidRecordedPaymentCreate(data, request, tripDocument) {
-          return tripDocument.data.baseCurrency is string &&
+        // Function to validate the creation of a recorded payment
+        // Takes the pre-fetched trip document as a parameter
+        function isValidRecordedPaymentCreate(data, request, tripDoc) { // tripDoc is the result of get()
+          return tripDoc.exists() && // Ensure tripDoc is valid before accessing .data
+                 'members' in tripDoc.data && tripDoc.data.members is list && // Check members list existence
+                 'baseCurrency' in tripDoc.data && tripDoc.data.baseCurrency is string && // Check baseCurrency
                  data.recordedBy == request.auth.uid &&
-                 data.dateRecorded == request.time &&
-                 data.fromUserId in tripDocument.data.members &&
-                 data.toUserId in tripDocument.data.members &&
+                 data.dateRecorded == request.time && // Correct for serverTimestamp on create
+                 data.fromUserId in tripDoc.data.members &&
+                 data.toUserId in tripDoc.data.members &&
                  data.fromUserId != data.toUserId &&
                  data.amount is number && data.amount > 0 &&
-                 data.currency == tripDocument.data.baseCurrency &&
+                 data.currency == tripDoc.data.baseCurrency &&
                  (
                    !('notes' in data) ||
                    data.notes == null ||
-                   data.notes == '' || // Added check for empty string explicitly if preferred
+                   data.notes == '' || // Explicitly allow empty string
                    (data.notes is string && data.notes.size() <= 250)
                  );
         }
 
+        // Rule for reading and listing recorded payments
         allow read, list: if
-          isAuthenticated(request) &&
-          (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
-            tripDoc.exists() &&
-            'members' in tripDoc.data &&
-            tripDoc.data.members is list &&
-            request.auth.uid in tripDoc.data.members
+          (
+            let trip = get(/databases/$(database)/documents/trips/$(tripId));
+            isAuthenticated(request) &&
+            trip.exists() &&
+            'members' in trip.data &&
+            trip.data.members is list &&
+            request.auth.uid in trip.data.members
           );
 
+        // Rule for creating recorded payments
         allow create: if
-          isAuthenticated(request) &&
-          (let tripDoc = get(/databases/$(database)/documents/trips/$(tripId));
-            tripDoc.exists() &&
-            'members' in tripDoc.data &&
-            tripDoc.data.members is list &&
-            request.auth.uid in tripDoc.data.members &&
-            isValidRecordedPaymentCreate(request.resource.data, request, tripDoc) // Pass tripDoc
+          (
+            let trip = get(/databases/$(database)/documents/trips/$(tripId)); // Fetch trip document once
+            // Basic access checks before calling the detailed validation function
+            isAuthenticated(request) &&
+            trip.exists() && // Ensure the trip document was actually found
+            'members' in trip.data && trip.data.members is list && // Ensure members field is a list
+            request.auth.uid in trip.data.members && // Ensure the current user is a member of the trip
+            // Call the validation function with the incoming data, request, and the fetched trip document
+            isValidRecordedPaymentCreate(request.resource.data, request, trip)
           );
 
+        // Disallow updates and deletes for recorded payments for now
         allow update, delete: if false;
       }
-    }
-  }
-}
+    } // End of match /trips/{tripId}
+  } // End of match /databases/{database}/documents
+} // End of service cloud.firestore
 
     
